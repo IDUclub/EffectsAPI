@@ -1,13 +1,15 @@
+import random
+
 import geopandas as gpd
 import pandas as pd
 import momepy
 import networkx as nx
-from loguru import logger
+from blocksnet.models.city import Building, BlockService, Block
 from pyproj.crs import CRS
-from blocksnet import (AccessibilityProcessor, BlocksGenerator, City, ServiceType)
-from api.utils.const import DEFAULT_CRS
-from . import project_service as ps
+from blocksnet import (AccessibilityProcessor, BlocksGenerator, City, ServiceType, LandUseProcessor)
+from app.api.utils import const
 from .. import effects_models as em
+from app.api.routers.effects.services.service_type_service import get_zones
 
 SPEED_M_MIN = 60 * 1000 / 60
 GAP_TOLERANCE = 5
@@ -125,7 +127,7 @@ def _get_boundaries(project_info : dict, scale : em.ScaleType) -> gpd.GeoDataFra
         boundaries = gpd.GeoDataFrame(geometry=[project_info['geometry']])
     else:
         boundaries = gpd.GeoDataFrame(geometry=[project_info['context']])
-    boundaries = boundaries.set_crs(DEFAULT_CRS)
+    boundaries = boundaries.set_crs(const.DEFAULT_CRS)
     local_crs = boundaries.estimate_utm_crs()
     return boundaries.to_crs(local_crs)
 
@@ -170,11 +172,81 @@ def _update_services(city : City, service_types : list[ServiceType], scenario_gd
         if service_type is not None:
             city.update_services(service_type, gdf)
 
-def fetch_city_model(project_info: dict,
-                      scenario_gdf: gpd.GeoDataFrame,
-                      physical_object_types: dict,
-                      service_types: list,
-                      scale: em.ScaleType):
+# ToDo handle no service case
+def _update_landuse(city: City, zones: gpd.GeoDataFrame):
+
+    def _process_zones(zones: gpd.GeoDataFrame):
+        db_zones = list(const.mapping.keys())
+        return zones[zones.zone.isin(db_zones)]
+
+    def _get_blocks_to_process(blocks, zones):
+        lup = LandUseProcessor(blocks=blocks, zones=zones, zone_to_land_use=const.mapping)
+        blocks_with_lu = lup.run(0.5)
+        return blocks_with_lu[~blocks_with_lu['land_use'].isna()]
+
+    def _update_non_residential_block(block: Block):
+        for building in block.buildings:
+            building.population = 0
+
+    def _update_residential_block(block: Block, pop_per_ha: float, service_types: list[ServiceType]):
+        pop_per_m2 = pop_per_ha / SQ_M_IN_HA
+        area = block.site_area
+        population = round(pop_per_m2 * area)
+        # удаляем здания и сервисы
+        block.buildings = []
+        block.services = []
+        # добавляем dummy здание и даем ему наше население
+        dummy_building = Building(
+            block=block,
+            geometry=block.geometry.buffer(-0.01),
+            population=population,
+            **const.DUMMY_BUILDING_PARAMS
+        )
+        block.buildings.append(dummy_building)
+        # добавляем по каждому типу сервиса большой dummy_service
+        for service_type in service_types:
+            capacity = service_type.calculate_in_need(population)
+            dummy_service = BlockService(
+                service_type=service_type,
+                capacity=capacity,
+                is_integrated=False,
+                block=block,
+                geometry=block.geometry.representative_point().buffer(0.01),
+            )
+            block.services.append(dummy_service)
+
+    def _update_block(block: Block, zone: str, service_types: list[ServiceType]):
+        if zone in const.residential_mapping:  # если квартал жилой
+            pop_min, pop_max = const.residential_mapping[zone]
+            _update_residential_block(block, random.randint(pop_min, pop_max), service_types)
+        else:
+            _update_non_residential_block(block)
+
+    def update_blocks(city: City, blocks_with_lu: gpd.GeoDataFrame, service_types: list[ServiceType]):
+        for block_id, row in blocks_with_lu.iterrows():
+            zone = row['zone']
+            block = city[block_id]
+            _update_block(block, zone, service_types)
+
+    LU_SHARE = 0.5
+    SQ_M_IN_HA = 10_000
+    zones = _process_zones(zones)
+    blocks = city.get_blocks_gdf(True)
+    zones.to_crs(blocks.crs, inplace=True)
+    blocks_with_lu = _get_blocks_to_process(blocks, zones)
+    residential_sts = [city[st_name] for st_name in ['school', 'kindergarten', 'polyclinic'] if st_name in city.services]
+    update_blocks(city, blocks_with_lu, residential_sts)
+    return city
+
+# ToDo move zones to preprocessing and pass them to the function
+def fetch_city_model(
+        project_info: dict,
+        project_scenario_id: int,
+        scenario_gdf: gpd.GeoDataFrame,
+        physical_object_types: dict,
+        service_types: list,
+        scale: em.ScaleType
+):
     
     # getting boundaries for our model
     boundaries_gdf = _get_boundaries(project_info, scale)
@@ -203,5 +275,8 @@ def fetch_city_model(project_info: dict,
 
     # updating service types
     _update_services(city, service_types, scenario_gdf)
+
+    zones = get_zones(project_scenario_id)
+    city = _update_landuse(city, zones)
 
     return city
