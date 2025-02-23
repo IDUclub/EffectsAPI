@@ -3,7 +3,7 @@ import json
 import requests
 import shapely
 import geopandas as gpd
-from api.utils import const
+from app.api.utils import const
 from loguru import logger
 from .. import effects_models as em 
 
@@ -21,13 +21,17 @@ def _get_scenario_objects(
         scenario_id : int,
         token : str,
         scale_type : em.ScaleType,
+        project_id: int,
         physical_object_type_id : int | None = None, 
         service_type_id : int | None = None, 
         physical_object_function_id : int | None = None, 
-        urban_function_id : int | None = None
+        urban_function_id : int | None = None,
     ):
   headers = {'Authorization': f'Bearer {token}'}
-  url = const.URBAN_API + f'/api/v1/scenarios/{scenario_id}/{"context/" if scale_type == em.ScaleType.CONTEXT else ""}geometries_with_all_objects'
+  if scale_type == em.ScaleType.CONTEXT:
+    url = const.URBAN_API + f'/api/v1/projects/{project_id}/context/geometries_with_all_objects'
+  else:
+    url = const.URBAN_API + f'/api/v1/scenarios/{scenario_id}/geometries_with_all_objects'
   res = requests.get(url, params={
       'physical_object_type_id': physical_object_type_id,
       'service_type_id': service_type_id,
@@ -36,8 +40,8 @@ def _get_scenario_objects(
   }, headers=headers)
   return res.json()
 
-def get_scenario_objects(scenario_id : int, token : str, *args, **kwargs) -> gpd.GeoDataFrame:
-  collections = [_get_scenario_objects(scenario_id, token, scale_type, *args, **kwargs) for scale_type in list(em.ScaleType)]
+def get_scenario_objects(scenario_id : int, token : str, project_id: int, *args, **kwargs) -> gpd.GeoDataFrame:
+  collections = [_get_scenario_objects(scenario_id, token, scale_type, project_id, *args, **kwargs) for scale_type in list(em.ScaleType)]
   features = [feature for collection in collections for feature in collection['features']]
   gdf = gpd.GeoDataFrame.from_features(features).set_crs(const.DEFAULT_CRS)
   return gdf.drop_duplicates(subset=['object_geometry_id'])

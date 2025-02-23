@@ -1,7 +1,9 @@
-
 import pandas as pd
+import geopandas as gpd
 import requests
-from api.utils import const
+from fastapi import HTTPException
+
+from app.api.utils import const
 from blocksnet.models import ServiceType
 
 def _get_service_types(region_id : int) -> pd.DataFrame:
@@ -41,3 +43,44 @@ def get_bn_service_types(region_id : int) -> list[ServiceType]:
     )
     service_types.append(service_type)
   return service_types
+
+def get_zones(scenario_id: int) -> gpd.GeoDataFrame:
+  """
+
+  Args:
+    scenario_id (int): scenario id
+
+  Returns:
+    gpd.GeoDataFrame: geodataframe with zones
+
+  """
+
+  def _form_source_params(sources: list[dict]) -> dict:
+    source_names = [i["source"] for i in sources]
+    source_data_df = pd.DataFrame(sources)
+    if "PZZ" in source_names:
+      return source_data_df.loc[
+        source_data_df[source_data_df["source"] == "PZZ"]["year"].idxmax()
+      ].to_dict()
+    elif "OSM" in source_names:
+      return source_data_df.loc[
+        source_data_df[source_data_df["source"] == "OSM"]["year"].idxmax()
+      ].to_dict()
+    elif "User" in source_names:
+      return source_data_df.loc[
+        source_data_df[source_data_df["source"] == "User"]["year"].idxmax()
+      ].to_dict()
+    else:
+      raise HTTPException(status_code=404, detail="Source type not found")
+
+  zones_sources = requests.get(
+    url=f"{const.URBAN_API}/api/v1/scenarios/{scenario_id}/functional_zone_sources",
+  )
+  zones_params_request = _form_source_params(zones_sources.json())
+  target_zones = requests.get(
+    url=f"{const.URBAN_API}/api/v1/scenarios/{scenario_id}/functional_zones",
+    params=zones_params_request,
+  )
+  target_zones_gdf = gpd.GeoDataFrame.from_features(target_zones.json(), crs=4326)
+  target_zones_gdf["zone"] = target_zones_gdf["functional_zone_type"].apply(lambda x: x.get("name"))
+  return target_zones_gdf

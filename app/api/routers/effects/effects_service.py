@@ -287,21 +287,27 @@ def evaluate_effects(project_scenario_id : int, token: str, reevaluate : bool = 
     logger.info('Fetching physical object types')
     physical_object_types = ps.get_physical_object_types()
     logger.info('Fetching scenario objects')
-    scenario_gdf = ps.get_scenario_objects(project_scenario_id, token)
+    scenario_gdf = ps.get_scenario_objects(project_scenario_id, token, project_info['project_id'])
 
     logger.info('Fetching project model')
-    project_model = bs.fetch_city_model(project_info=project_info,
-                                      service_types=service_types,
-                                      physical_object_types=physical_object_types,
-                                      scenario_gdf=scenario_gdf,
-                                      scale=em.ScaleType.PROJECT)
+    project_model = bs.fetch_city_model(
+        project_info=project_info,
+        project_scenario_id=project_scenario_id,
+        service_types=service_types,
+        physical_object_types=physical_object_types,
+        scenario_gdf=scenario_gdf,
+        scale=em.ScaleType.PROJECT
+    )
 
     logger.info('Fetching context model')
-    context_model = bs.fetch_city_model(project_info=project_info,
-                                      service_types=service_types,
-                                      physical_object_types=physical_object_types,
-                                      scenario_gdf=scenario_gdf,
-                                      scale=em.ScaleType.CONTEXT)
+    context_model = bs.fetch_city_model(
+        project_info=project_info,
+        project_scenario_id=project_scenario_id,
+        service_types=service_types,
+        physical_object_types=physical_object_types,
+        scenario_gdf=scenario_gdf,
+        scale=em.ScaleType.CONTEXT
+    )
     
     # project_model.to_pickle(f'{project_scenario_id}_project.pickle')
     # context_model.to_pickle(f'{project_scenario_id}_context.pickle')
