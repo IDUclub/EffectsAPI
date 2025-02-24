@@ -5,3 +5,5 @@ DockerRun.txt
 build.sh
 venv/
 .venv/
+/data
+**.parquet
