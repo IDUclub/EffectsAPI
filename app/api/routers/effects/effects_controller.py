@@ -9,6 +9,7 @@ from ...utils import auth, const, decorators
 from . import effects_models as em
 from . import effects_service as es
 from .services import service_type_service as sts
+from app.api.routers.effects.task_schema import TaskSchema
 
 router = APIRouter(prefix='/effects', tags=['Effects'])
 
@@ -55,20 +56,35 @@ def get_connectivity_layer(project_scenario_id: int, scale_type: em.ScaleType, t
 def get_connectivity_data(project_scenario_id: int, scale_type: em.ScaleType, token: str = Depends(auth.verify_token)):
     return es.get_connectivity_data(project_scenario_id, scale_type, token)
 
-def _evaluate_effects_task(task_id : str, *args, **kwargs):
-    tasks[task_id] = 'pending'
+def check_or_set_status(project_scenario_id: int, token: str)
+
+def check_result()
+
+def _evaluate_effects_task(task_id : str, project_scenario_id: int, token: str):
+    if tasks[project_scenario_id] and tasks[project_scenario_id] == 'success':
+        return {
+            "msg": "Task is already running",
+            "task": tasks[project_scenario_id]
+        }
+    tasks[task_id] = TaskSchema(
+        task_status={"task_status": "pending"},
+        task_info_status="forming",
+        target_scenario_id=project_scenario_id
+    )
+
     try:
-        es.evaluate_effects(*args, **kwargs)
+        es.evaluate_effects(project_scenario_id, token)
         tasks[task_id] = 'success'
     except Exception as e:
         logger.error(e)
+        logger.exception(e)
         tasks[task_id] = 'error'
 
 @router.post('/evaluate')
 def evaluate(background_tasks: BackgroundTasks, project_scenario_id: int, token: str = Depends(auth.verify_token)):
-    task_id = str(uuid4())
-    background_tasks.add_task(_evaluate_effects_task, task_id, project_scenario_id, token)
-    return {'task_id' : task_id }
+
+    background_tasks.add_task(_evaluate_effects_task, project_scenario_id, token)
+    return {'task_id' : project_scenario_id }
 
 @router.delete('/evaluation')
 def delete_evaluation(project_scenario_id : int):

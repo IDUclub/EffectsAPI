@@ -78,11 +78,11 @@ def _get_services(scenario_gdf) -> gpd.GeoDataFrame | None:
                     'service_id': service['service_id'],
                     'service_type_id': service['service_type']['id'],
                     'name': service['name'],
-                    'capacity_real': service['capacity_real'],
+                    'capacity_real': service['capacity'],
                     'geometry': row['geometry']  # Сохраняем геометрию
                 }
                 for service in row['services']
-                if service.get('capacity_real') is not None and service['capacity_real'] > 0
+                if service.get('capacity') is not None and service['capacity'] > 0
             ]
         return []
 
