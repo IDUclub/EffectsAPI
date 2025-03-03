@@ -19,5 +19,4 @@ class TaskInfoSchema(BaseModel):
 class TaskSchema(BaseModel):
     task_status: TaskStatusSchema
     target_scenario_id: int
-    task_info_status: Literal["forming", "done"]
     task_info: Optional[TaskInfoSchema] = None
