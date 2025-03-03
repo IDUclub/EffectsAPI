@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from app.api.routers.effects import effects_controller
+from app.api.routers.effects.task_schema import TaskSchema
 from app.api.utils.const import API_DESCRIPTION, API_TITLE
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,11 +44,11 @@ async def read_root():
     return RedirectResponse('/docs')
 
 @app.get('/tasks', tags=['Tasks'])
-def get_tasks() -> dict[str,str]:
+def get_tasks() -> dict[int, TaskSchema]:
     return effects_controller.tasks
 
 @app.get('/task_status', tags=['Tasks'])
-def get_task_status(task_id : str) -> str:
+def get_task_status(task_id : int) -> TaskSchema:
     return effects_controller.tasks[task_id]
 
 for controller in controllers:
