@@ -169,7 +169,7 @@ def _evaluate_effects_task(project_scenario_id: int, token: str):
 
     try:
         es.evaluate_effects(project_scenario_id, token)
-        tasks[project_scenario_id].task_status = "success"
+        tasks[project_scenario_id].task_status.task_status = "success"
     except Exception as e:
         logger.error(e)
         logger.exception(e)
