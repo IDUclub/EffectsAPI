@@ -16,7 +16,7 @@ ENV APP_ENV=development
 
 # Install pip requirements
 COPY requirements.txt .
-RUN python.exe -m pip install --upgrade pip
+RUN python -m pip install --upgrade pip
 RUN python -m pip install -r requirements.txt
 
 WORKDIR /app
