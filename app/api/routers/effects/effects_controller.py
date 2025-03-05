@@ -126,6 +126,12 @@ def check_or_set_status(project_scenario_id: int, token) -> dict:
             task_info.task_status.task_status = "pending"
             return {"action": "continue"}
         match task_info.task_status.task_status:
+            case "success":
+                return {
+                    "action": "return",
+                    "msg": "task is already done and up to date",
+                    "task_info": task_info,
+                }
             case "pending":
                 return {
                     "action": "return",
