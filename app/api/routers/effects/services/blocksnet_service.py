@@ -33,14 +33,16 @@ def _get_water(scenario_gdf, physical_object_types):
 def _get_roads(scenario_gdf, physical_object_types):
     roads = _get_geoms_by_function('Дорога', physical_object_types, scenario_gdf)
     merged = roads.unary_union
-    if merged.geom_type == 'MultiLineString':
-        roads = gpd.GeoDataFrame(geometry=list(merged.geoms), crs=roads.crs)
-    else:
-        roads = gpd.GeoDataFrame(geometry=[merged], crs=roads.crs)
-    roads = roads.explode(index_parts=False).reset_index(drop=True)
-    roads.geometry = momepy.close_gaps(roads, GAP_TOLERANCE)
-    roads = roads[roads.geom_type.isin(['LineString'])]
-    return roads
+    if merged:
+        if merged.geom_type == 'MultiLineString':
+            roads = gpd.GeoDataFrame(geometry=list(merged.geoms), crs=roads.crs)
+        else:
+            roads = gpd.GeoDataFrame(geometry=[merged], crs=roads.crs)
+        roads = roads.explode(index_parts=False).reset_index(drop=True)
+        roads.geometry = momepy.close_gaps(roads, GAP_TOLERANCE)
+        roads = roads[roads.geom_type.isin(['LineString'])]
+        return roads
+    return gpd.GeoDataFrame()
 
 def _get_geoms_by_object_type_id(scenario_gdf, object_type_id):
     return scenario_gdf[scenario_gdf['physical_objects'].apply(lambda x: any(d.get('physical_object_type').get('id') == object_type_id for d in x))]
@@ -107,7 +109,8 @@ def _get_services(scenario_gdf) -> gpd.GeoDataFrame | None:
 
 
 def _roads_to_graph(roads):
-    roads.to_parquet(f'roads_{len(roads)}.parquet')
+    if not roads.empty:
+        roads.to_parquet(f'roads_{len(roads)}.parquet')
     graph = momepy.gdf_to_nx(roads)
     graph.graph['crs'] = CRS.to_epsg(roads.crs)
     graph = nx.DiGraph(graph)
@@ -261,8 +264,11 @@ def fetch_city_model(
     # generating blocks layer
     blocks_gdf = _generate_blocks(boundaries_gdf, roads_gdf, scenario_gdf, physical_object_types)
 
-    # calculating accessibility matrix
-    acc_mx = _calculate_acc_mx(blocks_gdf, roads_gdf)
+    #ToDo Revise project logic without roads
+    if len(blocks_gdf) == 1:
+        acc_mx = pd.DataFrame([[0]], index=[0], columns=[0])
+    else:
+        acc_mx = _calculate_acc_mx(blocks_gdf, roads_gdf)
 
     # initializing city model
     city = City(

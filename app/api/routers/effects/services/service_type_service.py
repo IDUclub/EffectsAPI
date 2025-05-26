@@ -71,7 +71,7 @@ def get_zones(scenario_id: int) -> gpd.GeoDataFrame:
         source_data_df[source_data_df["source"] == "User"]["year"].idxmax()
       ].to_dict()
     else:
-      raise HTTPException(status_code=404, detail="Source type not found")
+      raise HTTPException(status_code=404, detail={"msg": "Pzz zones not found. Upload pzz firstly"})
 
   zones_sources = requests.get(
     url=f"{const.URBAN_API}/api/v1/scenarios/{scenario_id}/functional_zone_sources",
