@@ -1,6 +1,6 @@
 import os
 from iduconfig import Config
-from blocksnet import LandUse
+from blocksnet.enums import LandUse
 
 
 config = Config()
@@ -35,13 +35,10 @@ mapping = {
   'agriculture': LandUse.AGRICULTURE,
   'transport': LandUse.TRANSPORT,
   'business': LandUse.BUSINESS,
-  # 'basic': ,
   'residential_individual': LandUse.RESIDENTIAL,
   'residential_lowrise': LandUse.RESIDENTIAL,
   'residential_midrise': LandUse.RESIDENTIAL,
   'residential_multistorey': LandUse.RESIDENTIAL,
-  # 'unknown': '',
-  # 'mixed_use': ''
  }
 
 

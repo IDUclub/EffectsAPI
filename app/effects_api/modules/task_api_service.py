@@ -1,12 +1,9 @@
-from datetime import datetime
 from typing import Optional
 
 import requests
 from fastapi import HTTPException
 
-from app.api.utils.const import URBAN_API
-from app.api.routers.effects.task_schema import TaskInfoSchema
-
+from app.effects_api.constants.const import URBAN_API
 
 
 def get_headers(token: Optional[str] = None) -> dict[str, str] | None:

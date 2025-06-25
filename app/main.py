@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
 
-from app.api.routers.effects import effects_controller
-from app.api.routers.effects.task_schema import TaskSchema
-from app.api.utils.const import API_DESCRIPTION, API_TITLE
+from app.effects_api import effects_controller
+from app.effects_api.schemas.task_schema import TaskSchema
+from app.effects_api.constants.const import API_DESCRIPTION, API_TITLE
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware

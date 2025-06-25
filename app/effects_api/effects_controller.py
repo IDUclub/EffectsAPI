@@ -3,14 +3,14 @@ from datetime import datetime
 from typing import Annotated
 
 from loguru import logger
-from blocksnet.models import ServiceType
+# from blocksnet.models import ServiceType
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from ...utils import auth, const, decorators
-from . import effects_models as em
-from . import effects_service as es
-from .services import service_type_service as sts
-from app.api.routers.effects.task_schema import TaskSchema, TaskStatusSchema, TaskInfoSchema
-from app.api.routers.effects.services.task_api_service import get_scenario_info, get_all_project_info, get_project_id
+from app.effects_api.constants import const
+from app.common import auth, decorators
+from app.effects_api.models import effects_models as em
+from app.effects_api.modules import effects_service as es, service_type_service as sts
+from app.effects_api.schemas.task_schema import TaskSchema, TaskStatusSchema, TaskInfoSchema
+from app.effects_api.modules.task_api_service import get_scenario_info, get_all_project_info, get_project_id
 
 router = APIRouter(prefix='/effects', tags=['Effects'])
 
@@ -68,47 +68,6 @@ def check_task_evaluation(scenario_id: int) -> None:
             }
         )
 
-@router.get('/service_types')
-def get_service_types(region_id: int) -> list[ServiceType]:
-    return sts.get_bn_service_types(region_id)
-
-@router.get('/provision_layer')
-@decorators.gdf_to_geojson
-def get_provision_layer(project_scenario_id: int, scale_type: em.ScaleType, service_type_id: int,
-                        token: str = Depends(auth.verify_token)):
-    check_task_evaluation(project_scenario_id)
-    return es.get_provision_layer(project_scenario_id, scale_type, service_type_id, token)
-
-@router.get('/provision_data')
-def get_provision_data(
-        project_scenario_id: int,
-        scale_type: Annotated[em.ScaleTypeModel, Depends(em.ScaleTypeModel)],
-        token: str = Depends(auth.verify_token)
-):
-    check_task_evaluation(project_scenario_id)
-    return es.get_provision_data(project_scenario_id, scale_type.scale_type, token)
-
-@router.get('/transport_layer')
-@decorators.gdf_to_geojson
-def get_transport_layer(project_scenario_id: int, scale_type: em.ScaleType, token: str = Depends(auth.verify_token)):
-    check_task_evaluation(project_scenario_id)
-    return es.get_transport_layer(project_scenario_id, scale_type, token)
-
-@router.get('/transport_data')
-def get_transport_data(project_scenario_id: int, scale_type: em.ScaleType, token: str = Depends(auth.verify_token)):
-    check_task_evaluation(project_scenario_id)
-    return es.get_transport_data(project_scenario_id, scale_type, token)
-
-@router.get('/connectivity_layer')
-@decorators.gdf_to_geojson
-def get_connectivity_layer(project_scenario_id: int, scale_type: em.ScaleType, token: str = Depends(auth.verify_token)):
-    check_task_evaluation(project_scenario_id)
-    return es.get_connectivity_layer(project_scenario_id, scale_type, token)
-
-@router.get('/connectivity_data')
-def get_connectivity_data(project_scenario_id: int, scale_type: em.ScaleType, token: str = Depends(auth.verify_token)):
-    check_task_evaluation(project_scenario_id)
-    return es.get_connectivity_data(project_scenario_id, scale_type, token)
 
 #ToDo rewrite to check token firstly
 def check_or_set_status(project_scenario_id: int, token) -> dict:
@@ -171,10 +130,9 @@ def check_or_set_status(project_scenario_id: int, token) -> dict:
         )
         return {"action": "continue"}
 
-def _evaluate_effects_task(project_scenario_id: int, token: str):
-
+def _evaluate_master_plan_task(project_scenario_id: int, token: str = Depends(auth.verify_token), is_context: bool = False):
     try:
-        es.evaluate_effects(project_scenario_id, token)
+        es.evaluate_f22(project_scenario_id, token, is_context=is_context)
         tasks[project_scenario_id].task_status.task_status = "success"
     except Exception as e:
         logger.error(e)
@@ -182,14 +140,15 @@ def _evaluate_effects_task(project_scenario_id: int, token: str):
         tasks[project_scenario_id].task_status.task_status = 'error'
         tasks[project_scenario_id].task_status.error_info = e.__str__()
 
+
 @router.post('/evaluate')
-def evaluate(background_tasks: BackgroundTasks, project_scenario_id: int, token: str = Depends(auth.verify_token)):
+def evaluate(background_tasks: BackgroundTasks, project_scenario_id: int, token: str = Depends(auth.verify_token), is_context: bool = False):
     check_result = check_or_set_status(project_scenario_id, token)
     if check_result["action"] == "return":
         del check_result["action"]
         return check_result
-    background_tasks.add_task(_evaluate_effects_task, project_scenario_id, token)
-    return {'task_id' : project_scenario_id }
+    background_tasks.add_task(_evaluate_master_plan_task, project_scenario_id, token, is_context=is_context)
+    return {'task_id': project_scenario_id}
 
 @router.delete('/evaluation')
 def delete_evaluation(project_scenario_id : int):
@@ -198,3 +157,7 @@ def delete_evaluation(project_scenario_id : int):
         return 'oke'
     except:
         return 'oops'
+
+
+
+
