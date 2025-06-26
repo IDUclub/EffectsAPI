@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 from typing import Annotated
@@ -5,10 +6,15 @@ from typing import Annotated
 from loguru import logger
 # from blocksnet.models import ServiceType
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from starlette.responses import JSONResponse
+import geopandas as gpd
+
 from app.effects_api.constants import const
 from app.common import auth, decorators
 from app.effects_api.models import effects_models as em
 from app.effects_api.modules import effects_service as es, service_type_service as sts
+from app.effects_api.modules.f22_service import run_development_parameters
+from app.effects_api.modules.scenario_service import get_scenario_functional_zones
 from app.effects_api.schemas.task_schema import TaskSchema, TaskStatusSchema, TaskInfoSchema
 from app.effects_api.modules.task_api_service import get_scenario_info, get_all_project_info, get_project_id
 
@@ -149,6 +155,36 @@ def evaluate(background_tasks: BackgroundTasks, project_scenario_id: int, token:
         return check_result
     background_tasks.add_task(_evaluate_master_plan_task, project_scenario_id, token, is_context=is_context)
     return {'task_id': project_scenario_id}
+
+#ручка для теста, можно убрать
+@router.get('/get_scenario_zones/{scenario_id}')
+async def get_scenario_zones(scenario_id: int):
+    zones: gpd.GeoDataFrame = await get_scenario_functional_zones(scenario_id)
+    geojson_str = zones.to_json()
+    geojson_dict = json.loads(geojson_str)
+    return JSONResponse(content=geojson_dict, media_type="application/geo+json")
+
+
+# @router.post('/socio_economic_effects/{scenario_id}')
+# def evaluate_socio_economic_effects(
+#         scenario_id: int,
+#         token: str = Depends(auth.verify_token),
+#         functional_zone_source: str,
+#         functional_zone_year: int,
+#         context_functional_zone_source: str,
+#         context_functional_zone_year: int
+#
+# ):
+#
+
+@router.get('/get_development_parameters/{scenario_id}')
+async def get_development_parameters(scenario_id: int):
+    development_parameters: gpd.GeoDataFrame = await run_development_parameters(scenario_id)
+    geojson_str = development_parameters.to_json()
+    geojson_dict = json.loads(geojson_str)
+    return JSONResponse(content=geojson_dict, media_type="application/geo+json")
+
+
 
 @router.delete('/evaluation')
 def delete_evaluation(project_scenario_id : int):
