@@ -3,7 +3,7 @@ import sys
 from loguru import logger
 from iduconfig import Config
 
-from app.common.api_handler import APIHandler
+from app.common.api_handlers.json_api_handler import JSONAPIHandler
 
 logger.remove()
 logger.add(sys.stderr, level="INFO")
@@ -24,4 +24,4 @@ logger.add(
     level="INFO",
 )
 
-urban_api_handler = APIHandler(config.get("URBAN_API"))
+urban_api_handler = JSONAPIHandler(config.get("URBAN_API"))

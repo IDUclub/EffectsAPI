@@ -20,11 +20,6 @@ from app.effects_api.modules.task_api_service import get_scenario_info, get_all_
 
 router = APIRouter(prefix='/effects', tags=['Effects'])
 
-def on_startup(): # TODO оценка базовых сценариев
-    if not os.path.exists(const.DATA_PATH):
-        logger.info(f'Creating data folder at {const.DATA_PATH}')
-        os.mkdir(const.DATA_PATH)
-
 tasks: dict[int, TaskSchema] = {}
 
 def check_task_evaluation(scenario_id: int) -> None:

@@ -2,30 +2,19 @@ from contextlib import asynccontextmanager
 
 from app.effects_api import effects_controller
 from app.effects_api.schemas.task_schema import TaskSchema
-from app.effects_api.constants.const import API_DESCRIPTION, API_TITLE
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 
-controllers = [effects_controller]
-
-async def on_startup():
-    for c in controllers:
-        c.on_startup()
-
-async def on_shutdown():
-    ...
 
 @asynccontextmanager
 async def lifespan(router : FastAPI):
-    await on_startup()
     yield
-    await on_shutdown()
 
 app = FastAPI(
-    title=API_TITLE,
-    description=API_DESCRIPTION,
+    title="Effects API",
+    description="API for calculating effects of territory transformation with BlocksNet library",
     lifespan=lifespan
 )
 
@@ -50,6 +39,3 @@ def get_tasks() -> dict[int, TaskSchema]:
 @app.get('/task_status', tags=['Tasks'])
 def get_task_status(task_id : int) -> TaskSchema:
     return effects_controller.tasks[task_id]
-
-for controller in controllers:
-    app.include_router(controller.router)
