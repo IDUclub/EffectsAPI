@@ -48,11 +48,11 @@ def _get_context_boundaries(project_id : int) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(geometry=geometries, crs=4326)
 
 def _get_context_roads(project_id : int):
-    gdf = projects.get_physical_objects(project_id, physical_object_function_id=ROADS_POF_ID)
+    gdf = projects.get_physical_objects_scenario(project_id, physical_object_function_id=ROADS_POF_ID)
     return gdf[['geometry']].reset_index(drop=True)
 
 def _get_context_water(project_id : int):
-    gdf = projects.get_physical_objects(project_id, physical_object_function_id=WATER_POF_ID)
+    gdf = projects.get_physical_objects_scenario(project_id, physical_object_function_id=WATER_POF_ID)
     return gdf[['geometry']].reset_index(drop=True)
 
 def _get_context_blocks(project_id : int, boundaries : gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -82,17 +82,17 @@ def get_context_blocks(project_id: int, token: str):
 def get_context_functional_zones(project_id : int, token: str) -> gpd.GeoDataFrame:
     sources_df = get_zones(project_id, token, is_context=True)
     year, source = _get_best_functional_zones_source(sources_df)
-    functional_zones = projects.get_functional_zones(project_id, year, source)
+    functional_zones = projects.get_functional_zones_scenario(project_id, year, source)
     return adapt_functional_zones(functional_zones)
 
 def get_context_buildings(project_id : int):
-    gdf = projects.get_physical_objects(project_id, physical_object_type_id=1, centers_only=True)
+    gdf = projects.get_physical_objects_scenario(project_id, physical_object_type_id=1, centers_only=True)
     gdf = adapt_buildings(gdf.reset_index(drop=True))
     crs = gdf.estimate_utm_crs()
     return impute_buildings(gdf.to_crs(crs)).to_crs(4326)
 
 def get_context_services(project_id : int, service_types : pd.DataFrame):
-    gdf = projects.get_services(project_id, centers_only=True)
+    gdf = projects.get_services_scenario(project_id, centers_only=True)
     gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
     return {st:impute_services(gdf,st) for st,gdf in gdfs.items()}
 
