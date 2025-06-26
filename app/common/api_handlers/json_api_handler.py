@@ -3,7 +3,7 @@ import aiohttp
 from app.common.exceptions.http_exception_wrapper import http_exception
 
 
-class APIHandler:
+class JSONAPIHandler:
 
     def __init__(
             self,
@@ -56,6 +56,25 @@ class APIHandler:
                 _detail=await response.json(),
             )
 
+    @staticmethod
+    async def check_request_params(
+        params: dict[str, str | int | float | bool] | None,
+    ) -> dict | None:
+        """
+        Function checks request parameters
+        Args:
+            params (dict[str, str | int | float | bool]  | None): Request parameters
+        Returns:
+            dict | None: Returns modified parameters if they are not empty, otherwise returns None
+        """
+
+        if params:
+            for key, param in params.items():
+                if isinstance(param, bool):
+                    params[key] = {True: "true", False: "false"}[param]
+            return params
+        return params
+
     async def get(
             self,
             endpoint_url: str,
@@ -64,7 +83,6 @@ class APIHandler:
             session: aiohttp.ClientSession | None = None,
     ) -> dict | list:
         """Function to get data from api
-
         Args:
             endpoint_url (str): Endpoint url
             headers (dict | None): Headers
@@ -115,7 +133,6 @@ class APIHandler:
             session: aiohttp.ClientSession | None = None,
         ) -> dict | list:
         """Function to post data from api
-
         Args:
             endpoint_url (str): Endpoint url
             headers (dict | None): Headers
@@ -144,7 +161,7 @@ class APIHandler:
         ) as response:
             result = await self._check_response_status(response)
             if not result:
-                return await  self.post(
+                return await self.post(
                     endpoint_url=endpoint_url,
                     headers=headers,
                     params=params,
@@ -161,7 +178,6 @@ class APIHandler:
             session: aiohttp.ClientSession | None = None,
     ) -> dict | list:
         """Function to post data from api
-
         Args:
             endpoint_url (str): Endpoint url
             headers (dict | None): Headers
@@ -207,7 +223,6 @@ class APIHandler:
             session: aiohttp.ClientSession | None = None,
     ) -> dict | list:
         """Function to post data from api
-
         Args:
             endpoint_url (str): Endpoint url
             headers (dict | None): Headers
