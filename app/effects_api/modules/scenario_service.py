@@ -129,8 +129,8 @@ async def get_scenario_buildings(scenario_id: int):
 async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame):
     try:
         gdf = await UrbanAPIGateway.get_services_scenario(scenario_id, centers_only=True)
-    except:
-        return {}
-    gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
-    return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
+        gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
+        return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
+    except Exception as e:
+        http_exception(404, f'No buildings found for scenario {scenario_id}', str(e))
 
