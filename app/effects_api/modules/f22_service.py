@@ -35,8 +35,8 @@ async def aggregate_blocks_layer_scenario(
     blocks = blocks.join(blocks_lu.drop(columns=['geometry']))
     logger.info(f"{len(blocks)} BLOCKS WITH LANDUSE blocks layer scenario {scenario_id}, CRS: {blocks.crs}, {blocks.columns}")
     logger.info(f"buildings layer scenario {scenario_id}")
-    #TODO жилых зданий может нге быть в сценарии, пока ломается здесь
-    buildings = await get_scenario_buildings(scenario_id)
+    # #TODO жилых зданий может нге быть в сценарии, пока ломается здесь
+    # # buildings = await get_scenario_buildings(scenario_id)
     logger.info(
         f"{len(blocks)} BLOCKS WITH BUILDINGS layer scenario {scenario_id}, CRS: {blocks.crs}, {blocks.columns}")
     buildings = buildings.to_crs(blocks_crs)
@@ -48,7 +48,11 @@ async def aggregate_blocks_layer_scenario(
         blocks['count_buildings'] = blocks['count_buildings'].fillna(0).astype(int)
     logger.info(f"service_types layer scenario {scenario_id}")
     service_types = await get_service_types()
+    logger.info(
+        f"{len(blocks)} BLOCKS WITH LANDUSE blocks layer scenario {scenario_id}, CRS: {blocks.crs}, {blocks.columns}")
     services_dict = await get_scenario_services(scenario_id, service_types)
+    logger.info(
+        f"{len(blocks)} BLOCKS WITH LANDUSE blocks layer scenario {scenario_id}, service_dict {services_dict}")
     for service_type, services in services_dict.items():
         services = services.to_crs(blocks.crs)
         blocks_services, _ = aggregate_objects(blocks, services)
@@ -58,8 +62,28 @@ async def aggregate_blocks_layer_scenario(
             'capacity': f'capacity_{service_type}',
             'objects_count': f'count_{service_type}',
         }))
-        logger.info(f"{len(blocks)} SERVICES blocks layer scenario {scenario_id}, CRS: {blocks.crs}")
-        return blocks
+    logger.info(f"{len(blocks)} SERVICES blocks layer scenario {scenario_id}, CRS: {blocks.crs}")
+    return blocks
+
+async def get_services_layer(scenario_id: int):
+    blocks = await get_scenario_blocks(scenario_id)
+    blocks_crs = blocks.crs
+    logger.info(f"{len(blocks)} START blocks layer scenario{scenario_id}, CRS: {blocks.crs}")
+    service_types = await get_service_types()
+    logger.info(f"{service_types}")
+    services_dict = await get_scenario_services(scenario_id, service_types)
+
+    for service_type, services in services_dict.items():
+        services = services.to_crs(blocks_crs)
+        blocks_services, _ = aggregate_objects(blocks, services)
+        blocks_services['capacity'] = blocks_services['capacity'].fillna(0).astype(int)
+        blocks_services['objects_count'] = blocks_services['objects_count'].fillna(0).astype(int)
+        blocks = blocks.join(blocks_services.drop(columns=['geometry']).rename(columns={
+            'capacity': f'capacity_{service_type}',
+            'objects_count': f'count_{service_type}',
+        }))
+    logger.info(f"{len(blocks)} SERVICES blocks layer scenario {scenario_id}, CRS: {blocks.crs}")
+    return blocks
 
 async def run_development_parameters(scenario_id: int) -> gpd.GeoDataFrame | pd.DataFrame:
     blocks = await aggregate_blocks_layer_scenario(scenario_id)

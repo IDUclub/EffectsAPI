@@ -110,6 +110,19 @@ class UrbanAPIGateway:
         )
 
     @staticmethod
+    async def get_project_id_by_scenario_id(scenario_id: int, token: str = None) -> int:
+        endpoint = f"/api/v1/scenarios/{scenario_id}"
+        response = await urban_api_handler.get(endpoint, headers={
+            "Authorization": f"Bearer {token}"""
+        })
+        try:
+            project_id = response.get("project", {}).get("project_id")
+        except Exception:
+            raise http_exception(404, "Project ID is missing in scenario data.", scenario_id)
+
+        return project_id
+
+    @staticmethod
     async def get_physical_objects_scenario(
             scenario_id: int,
             **kwargs: Any
@@ -142,6 +155,9 @@ class UrbanAPIGateway:
             gpd.GeoDataFrame.from_features(features, crs=4326)
             .set_index("service_id")
         )
+
+
+
 
 # Экземпляр для удобства
 UrbanAPIGateway = UrbanAPIGateway()

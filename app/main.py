@@ -27,6 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=100)
+app.include_router(effects_controller.router)
 
 @app.get("/", include_in_schema=False)
 async def read_root():

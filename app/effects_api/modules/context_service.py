@@ -63,7 +63,7 @@ async def get_context_blocks(project_id: int):
     return _get_context_blocks(project_id, context_boundaries)
 
 
-async def get_context_functional_zones(project_id: int, token: str) -> gpd.GeoDataFrame:
+async def get_context_functional_zones(project_id: int, token: str = None) -> gpd.GeoDataFrame:
     sources_df = await UrbanAPIGateway.get_functional_zones_sources(project_id)
     year, source = _get_best_functional_zones_source(sources_df)
     functional_zones = await UrbanAPIGateway.get_functional_zones_scenario(project_id, year, source)
