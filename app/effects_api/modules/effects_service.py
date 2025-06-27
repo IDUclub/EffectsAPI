@@ -1,6 +1,4 @@
 import os
-import math
-from typing import Literal
 
 import geopandas as gpd
 import warnings
@@ -13,7 +11,8 @@ from urllib3.exceptions import InsecureRequestWarning
 from loguru import logger
 from app.effects_api.constants import const
 from app.effects_api.models import effects_models as em
-from app.effects_api.modules import blocksnet_service as bs, urban_api_gateway as ps
+from app.effects_api.modules import blocksnet_service as bs
+from app.gateways import urban_api_gateway as ps
 
 for warning in [pd.errors.PerformanceWarning, RuntimeWarning, pd.errors.SettingWithCopyWarning, InsecureRequestWarning,
                 FutureWarning]:

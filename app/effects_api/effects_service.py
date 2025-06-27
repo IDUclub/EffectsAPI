@@ -1,6 +1,7 @@
 from .dto.development_dto import DevelopmentDTO, ContextDevelopmentDTO
 
 
+from fastapi import HTTPException
 import pandas as pd
 import geopandas as gpd
 from blocksnet.machine_learning.regression import SocialRegressor
@@ -19,6 +20,8 @@ from app.effects_api.modules.service_type_service import get_service_types
 from .modules.context_service import get_context_blocks, get_context_functional_zones, get_context_buildings, \
     get_context_services
 from .modules.task_api_service import get_project_id
+from ..common.exceptions.http_exception_wrapper import http_exception
+from ..dependencies import urban_api_gateway
 
 
 class EffectsService:
@@ -35,7 +38,6 @@ def _evaluate_master_plan(blocks: gpd.GeoDataFrame, buildings_blocks_gdf: gpd.Ge
     adjacency_graph = generate_adjacency_graph(blocks, 10)
     dr = DensityRegressor()
     density_df = dr.evaluate(blocks, adjacency_graph)
-
 
     density_df.loc[density_df['fsi'] < 0, 'fsi'] = 0
     density_df.loc[density_df['gsi'] < 0, 'gsi'] = 0
@@ -163,67 +165,97 @@ async def aggregate_blocks_layer_scenario(
     blocks = blocks.join(blocks_lu.drop(columns=['geometry']))
     return blocks
 
-async def get_services_layer(scenario_id: int):
-    blocks = await get_scenario_blocks(scenario_id)
-    blocks_crs = blocks.crs
-    logger.info(f"{len(blocks)} START blocks layer scenario{scenario_id}, CRS: {blocks.crs}")
-    service_types = await get_service_types()
-    logger.info(f"{service_types}")
-    services_dict = await get_scenario_services(scenario_id, service_types)
+    @staticmethod
+    async def get_services_layer(scenario_id: int):
+        blocks = await get_scenario_blocks(scenario_id)
+        blocks_crs = blocks.crs
+        logger.info(f"{len(blocks)} START blocks layer scenario{scenario_id}, CRS: {blocks.crs}")
+        service_types = await get_service_types()
+        logger.info(f"{service_types}")
+        services_dict = await get_scenario_services(scenario_id, service_types)
 
-    for service_type, services in services_dict.items():
-        services = services.to_crs(blocks_crs)
-        blocks_services, _ = aggregate_objects(blocks, services)
-        blocks_services['capacity'] = blocks_services['capacity'].fillna(0).astype(int)
-        blocks_services['objects_count'] = blocks_services['objects_count'].fillna(0).astype(int)
-        blocks = blocks.join(blocks_services.drop(columns=['geometry']).rename(columns={
-            'capacity': f'capacity_{service_type}',
-            'objects_count': f'count_{service_type}',
-        }))
-    logger.info(f"{len(blocks)} SERVICES blocks layer scenario {scenario_id}, CRS: {blocks.crs}")
-    return blocks
+        for service_type, services in services_dict.items():
+            services = services.to_crs(blocks_crs)
+            blocks_services, _ = aggregate_objects(blocks, services)
+            blocks_services['capacity'] = blocks_services['capacity'].fillna(0).astype(int)
+            blocks_services['objects_count'] = blocks_services['objects_count'].fillna(0).astype(int)
+            blocks = blocks.join(blocks_services.drop(columns=['geometry']).rename(columns={
+                'capacity': f'capacity_{service_type}',
+                'objects_count': f'count_{service_type}',
+            }))
+        logger.info(f"{len(blocks)} SERVICES blocks layer scenario {scenario_id}, CRS: {blocks.crs}")
+        return blocks
 
-async def run_development_parameters(scenario_id: int) -> gpd.GeoDataFrame | pd.DataFrame:
-    blocks = await aggregate_blocks_layer_scenario(scenario_id)
-    for lu in LandUse:
-        blocks[lu.value] = blocks[lu.value].apply(lambda v: min(v, 1))
-    logger.info(f"adjacency_graph scenario {scenario_id}")
-    adjacency_graph = generate_adjacency_graph(blocks, 10)
-    dr = DensityRegressor()
+    async def run_development_parameters(
+            self,
+            scenario_id: int,
+            token: str,
+            zone_source: str,
+            zone_year: int,
+    ) -> gpd.GeoDataFrame | pd.DataFrame:
 
-    logger.info(f"DensityRegressor scenario {scenario_id}")
-    density_df = dr.evaluate(blocks, adjacency_graph)
-    density_df.loc[density_df['fsi'] < 0, 'fsi'] = 0
+        blocks = await self.aggregate_blocks_layer_scenario(scenario_id)
+        for lu in LandUse:
+            blocks[lu.value] = blocks[lu.value].apply(lambda v: min(v, 1))
+        logger.info(f"adjacency_graph scenario {scenario_id}")
+        adjacency_graph = generate_adjacency_graph(blocks, 10)
+        dr = DensityRegressor()
 
-    density_df.loc[density_df['gsi'] < 0, 'gsi'] = 0
-    density_df.loc[density_df['gsi'] > 1, 'gsi'] = 1
+        logger.info(f"DensityRegressor scenario {scenario_id}")
+        density_df = dr.evaluate(blocks, adjacency_graph)
+        density_df.loc[density_df['fsi'] < 0, 'fsi'] = 0
 
-    density_df.loc[density_df['mxi'] < 0, 'mxi'] = 0
-    density_df.loc[density_df['mxi'] > 1, 'mxi'] = 1
+        density_df.loc[density_df['gsi'] < 0, 'gsi'] = 0
+        density_df.loc[density_df['gsi'] > 1, 'gsi'] = 1
 
-    density_df.loc[blocks['residential'] == 0, 'mxi'] = 0
-    density_df['site_area'] = blocks['site_area']
+        density_df.loc[density_df['mxi'] < 0, 'mxi'] = 0
+        density_df.loc[density_df['mxi'] > 1, 'mxi'] = 1
 
-    logger.info(f"Calculating density indicators for {scenario_id}")
-    development_df = calculate_development_indicators(density_df)
-    development_df['population'] = development_df['living_area'] // 20
+        density_df.loc[blocks['residential'] == 0, 'mxi'] = 0
+        density_df['site_area'] = blocks['site_area']
 
+        logger.info(f"Calculating density indicators for {scenario_id}")
+        development_df = calculate_development_indicators(density_df)
+        development_df['population'] = development_df['living_area'] // 20
 
-    # mask = blocks['is_project']
-    # columns = ['build_floor_area', 'footprint_area', 'living_area', 'non_living_area', 'population']
-    # blocks.loc[mask, columns] = development_df.loc[mask, columns]
-    return development_df
+        return development_df
 
-    async def calc_project_development(self, params: DevelopmentDTO):
+    async def calc_project_development(self, token: str, params: DevelopmentDTO):
         """
         Function calculates development only for project with blocksnet
         Args:
-            params (DevelopmentDTO):
+            token (str): User token to access data from Urban API
+            params (DevelopmentDTO): development request params
         Returns:
             --
         """
 
-        pass
+        try:
+            if not params.proj_func_zone_source or not params.proj_func_zone_year:
+                (
+                    params.proj_func_zone_source,
+                    params.proj_func_source_year
+                ) = await urban_api_gateway.get_optimap_func_zone_request_data()
+            res = await self.aggregate_blocks_layer_scenario(
+                params.scenario_id,
+                token,
+                params.proj_func_zone_source,
+                params.proj_func_source_year
+            )
+            return res
+        except HTTPException as http_e:
+            logger.exception(http_e)
+            raise http_e
+        except Exception as e:
+            logger.exception(e)
+            raise http_exception(
+                500,
+                "Error during development calculation",
+                _input=params.__dict__,
+                _detail={
+                    "error": repr(e),
+                }
+            ) from e
 
     async def calc_context_development(self, params: ContextDevelopmentDTO):
         """

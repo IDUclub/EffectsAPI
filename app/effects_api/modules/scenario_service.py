@@ -12,7 +12,7 @@ from app.common.exceptions.http_exception_wrapper import http_exception
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.services_service import adapt_services
-from app.effects_api.modules.urban_api_gateway import UrbanAPIGateway
+from app.gateways.urban_api_gateway import urban_api_gateway
 
 SOURCES_PRIORITY = ['User', 'PZZ', 'OSM']
 
@@ -49,16 +49,16 @@ def close_gaps(gdf, tolerance):  # taken from momepy
 
 
 async def _get_project_boundaries(project_id: int):
-    return gpd.GeoDataFrame(geometry=[await UrbanAPIGateway.get_project_geometry(project_id)], crs=4326)
+    return gpd.GeoDataFrame(geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326)
 
 
 async def _get_scenario_roads(scenario_id: int):
-    gdf = await UrbanAPIGateway.get_physical_objects_scenario(scenario_id, physical_object_function_id=26)
+    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, physical_object_function_id=26)
     return gdf[['geometry']].reset_index(drop=True)
 
 
 async def _get_scenario_water(scenario_id: int):
-    gdf = await UrbanAPIGateway.get_physical_objects_scenario(scenario_id, physical_object_function_id=4)
+    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, physical_object_function_id=4)
     return gdf[['geometry']].reset_index(drop=True)
 
 
@@ -82,9 +82,9 @@ async def _get_scenario_blocks(user_scenario_id: int, base_scenario_id: int,
 
 
 async def _get_scenario_info(scenario_id: int) -> tuple[int, int]:
-    scenario = await UrbanAPIGateway.get_scenario(scenario_id)
+    scenario = await urban_api_gateway.get_scenario(scenario_id)
     project_id = scenario['project']['project_id']
-    project = await UrbanAPIGateway.get_project(project_id)
+    project = await urban_api_gateway.get_project(project_id)
     base_scenario_id = project['base_scenario']['id']
     return project_id, base_scenario_id
 
@@ -109,16 +109,16 @@ async def get_scenario_blocks(user_scenario_id: int):
     return await _get_scenario_blocks(user_scenario_id, base_scenario_id, project_boundaries)
 
 
-async def get_scenario_functional_zones(scenario_id: int, source: str = None, year: int = None) -> gpd.GeoDataFrame:
-    sources_df = await UrbanAPIGateway.get_functional_zones_sources_scenario(scenario_id)
+async def get_scenario_functional_zones(scenario_id: int, token: str, source: str = None, year: int = None) -> gpd.GeoDataFrame:
+    sources_df = await urban_api_gateway.get_functional_zones_sources_scenario(scenario_id)
     year, source = await _get_best_functional_zones_source(sources_df)
-    functional_zones = await UrbanAPIGateway.get_functional_zones_scenario(scenario_id, year, source)
+    functional_zones = await urban_api_gateway.get_functional_zones_scenario(scenario_id, year, source)
     return adapt_functional_zones(functional_zones)
 
 
 async def get_scenario_buildings(scenario_id: int):
     try:
-        gdf = await UrbanAPIGateway.get_physical_objects_scenario(scenario_id, physical_object_type_id=4, centers_only=True)
+        gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, physical_object_type_id=4, centers_only=True)
         gdf = adapt_buildings(gdf.reset_index(drop=True))
         crs = gdf.estimate_utm_crs()
         return impute_buildings(gdf.to_crs(crs)).to_crs(4326)
@@ -128,7 +128,7 @@ async def get_scenario_buildings(scenario_id: int):
 
 async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame):
     try:
-        gdf = await UrbanAPIGateway.get_services_scenario(scenario_id, centers_only=True)
+        gdf = await urban_api_gateway.get_services_scenario(scenario_id, centers_only=True)
         gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
         return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
     except Exception as e:
