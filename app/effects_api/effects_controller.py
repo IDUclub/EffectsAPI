@@ -1,11 +1,14 @@
 from typing import Annotated
 
 from fastapi import APIRouter
+from fastapi.encoders import jsonable_encoder
 from fastapi.params import Depends
+from starlette.responses import JSONResponse
 
 from app.common.auth.auth import verify_token
 from .dto.development_dto import DevelopmentDTO, ContextDevelopmentDTO
-from ..common.auth import auth
+from .dto.socio_economic_dto import SocioEconomicDTO
+from .effects_service import EffectsService
 
 development_router = APIRouter(prefix='/redevelopment', tags=['Effects'])
 
@@ -26,10 +29,16 @@ async def get_context_redevelopment(
 
 @development_router.get("/socio_economic_prediction")
 async def get_socio_economic_prediction(
-        scenario_id: int,
-        functional_zone_source: str,
-        functional_zone_year: int,
-        context_functional_zone_source: str,
-        context_functional_zone_year: int,
-        token: str = Depends(auth.verify_token),
+        params: Annotated[SocioEconomicDTO, Depends(SocioEconomicDTO)],
+        token: str = Depends(verify_token),
 ):
+    socio_economic_prediction = await EffectsService.evaluate_master_plan(
+        params.scenario_id,
+        params.project_functional_zone_source,
+        params.project_functional_zone_year,
+        params.context_functional_zone_source,
+        params.context_functional_zone_year,
+        token
+    )
+    payload = jsonable_encoder(socio_economic_prediction.to_dict(orient="index"))
+    return JSONResponse(content=payload)

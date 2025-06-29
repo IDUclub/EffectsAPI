@@ -1,5 +1,3 @@
-"""Все методы, которые вызывают ручки по сценарию
-А также методы, которые собиракют геослои по сценарию"""
 import shapely
 import numpy as np
 from blocksnet.preprocessing.imputing import impute_services
@@ -9,12 +7,12 @@ import geopandas as gpd
 import pandas as pd
 
 from app.common.exceptions.http_exception_wrapper import http_exception
+from app.dependencies import urban_api_gateway
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.services_service import adapt_services
-from app.gateways.urban_api_gateway import urban_api_gateway
 
-SOURCES_PRIORITY = ['User', 'PZZ', 'OSM']
+SOURCES_PRIORITY = ['PZZ', 'OSM', "User"]
 
 
 def close_gaps(gdf, tolerance):  # taken from momepy
@@ -52,26 +50,26 @@ async def _get_project_boundaries(project_id: int):
     return gpd.GeoDataFrame(geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326)
 
 
-async def _get_scenario_roads(scenario_id: int):
-    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, physical_object_function_id=26)
+async def _get_scenario_roads(scenario_id: int, token: str):
+    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_function_id=26)
     return gdf[['geometry']].reset_index(drop=True)
 
 
-async def _get_scenario_water(scenario_id: int):
-    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, physical_object_function_id=4)
+async def _get_scenario_water(scenario_id: int, token: str):
+    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_function_id=4)
     return gdf[['geometry']].reset_index(drop=True)
 
 
 async def _get_scenario_blocks(user_scenario_id: int, base_scenario_id: int,
-                         boundaries: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+                         boundaries: gpd.GeoDataFrame, token) -> gpd.GeoDataFrame:
     crs = boundaries.crs
     boundaries.geometry = boundaries.buffer(-1)
 
-    water = await _get_scenario_water(user_scenario_id)
+    water = await _get_scenario_water(user_scenario_id, token)
     water = water.to_crs(crs)
-    user_roads = await _get_scenario_roads(user_scenario_id)
+    user_roads = await _get_scenario_roads(user_scenario_id, token)
     user_roads = user_roads.to_crs(crs)
-    base_roads =await _get_scenario_roads(base_scenario_id)
+    base_roads =await _get_scenario_roads(base_scenario_id, token)
     base_roads = base_roads.to_crs(crs)
     roads = pd.concat([user_roads, base_roads]).reset_index(drop=True)
     roads.geometry = close_gaps(roads, 1)
@@ -81,44 +79,78 @@ async def _get_scenario_blocks(user_scenario_id: int, base_scenario_id: int,
     return blocks
 
 
-async def _get_scenario_info(scenario_id: int) -> tuple[int, int]:
-    scenario = await urban_api_gateway.get_scenario(scenario_id)
+async def _get_scenario_info(scenario_id: int, token: str) -> tuple[int, int]:
+    scenario = await urban_api_gateway.get_scenario(scenario_id, token)
     project_id = scenario['project']['project_id']
     project = await urban_api_gateway.get_project(project_id)
     base_scenario_id = project['base_scenario']['id']
     return project_id, base_scenario_id
 
 
-async def _get_best_functional_zones_source(sources_df: pd.DataFrame) -> tuple[int | None, str | None]:
-    sources = sources_df['source'].unique()
-    for source in SOURCES_PRIORITY:
-        if source in sources:
-            sources_df = sources_df[sources_df['source'] == source]
-            year = sources_df.year.max()
-            return int(year), source
-    return None, None  # FIXME ???
+async def _get_best_functional_zones_source(
+        sources_df: pd.DataFrame,
+        source: str | None = None,
+        year: int | None = None,
+) -> tuple[int | None, str | None]:
+    """
+    Pick the (year, source) pair that should be fetched.
+
+    Rules
+    -----
+    1. Nothing is given: latest year of the highest-priority source (PZZ).
+    2. Only `source`: latest year available for that source.
+    3. Only `year`: try that year for priority = PZZ, OSM, User.
+    4. 'Both given': use them as-is if a match exists, otherwise fall back to rule 3.
+    """
+    if source and year:
+        row = sources_df.query("source == @source and year == @year")
+        if not row.empty:
+            return year, source
+        year = int(year)
+        source = None
+
+    if source and year is None:
+        rows = sources_df.query("source == @source")
+        if not rows.empty:
+            return int(rows["year"].max()), source
+        source = None
+
+    if year is not None and source is None:
+        for s in SOURCES_PRIORITY:
+            row = sources_df.query("source == @s and year == @year")
+            if not row.empty:
+                return year, s
+
+    # else:
+    #     raise http_exception(404, "No source or year were found:", [source, year])
+
+    for s in SOURCES_PRIORITY:
+        rows = sources_df.query("source == @s")
+        if not rows.empty:
+            return int(rows["year"].max()), s
 
 
-async def get_scenario_blocks(user_scenario_id: int):
-    project_id, base_scenario_id = await _get_scenario_info(user_scenario_id)
+async def get_scenario_blocks(user_scenario_id: int, token: str) -> gpd.GeoDataFrame:
+    project_id, base_scenario_id = await _get_scenario_info(user_scenario_id, token)
     project_boundaries = await _get_project_boundaries(project_id)
 
     crs = project_boundaries.estimate_utm_crs()
     project_boundaries = project_boundaries.to_crs(crs)
 
-    return await _get_scenario_blocks(user_scenario_id, base_scenario_id, project_boundaries)
+    return await _get_scenario_blocks(user_scenario_id, base_scenario_id, project_boundaries, token)
 
 
 async def get_scenario_functional_zones(scenario_id: int, token: str, source: str = None, year: int = None) -> gpd.GeoDataFrame:
-    sources_df = await urban_api_gateway.get_functional_zones_sources_scenario(scenario_id)
-    year, source = await _get_best_functional_zones_source(sources_df)
-    functional_zones = await urban_api_gateway.get_functional_zones_scenario(scenario_id, year, source)
+    sources_df = await urban_api_gateway.get_functional_zones_sources_scenario(scenario_id, token)
+    year, source = await _get_best_functional_zones_source(sources_df, source, year)
+    # year, source = await urban_api_gateway.get_optimal_func_zone_request_data(token, scenario_id, year, source)
+    functional_zones = await urban_api_gateway.get_functional_zones_scenario(scenario_id, token, year, source)
     return adapt_functional_zones(functional_zones)
 
 
-async def get_scenario_buildings(scenario_id: int):
+async def get_scenario_buildings(scenario_id: int, token: str):
     try:
-        gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, physical_object_type_id=4, centers_only=True)
+        gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_type_id=4, centers_only=True)
         gdf = adapt_buildings(gdf.reset_index(drop=True))
         crs = gdf.estimate_utm_crs()
         return impute_buildings(gdf.to_crs(crs)).to_crs(4326)
@@ -126,11 +158,12 @@ async def get_scenario_buildings(scenario_id: int):
         http_exception(404, f'No buildings found for scenario {scenario_id}', str(e))
 
 
-async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame):
+async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame, token: str):
     try:
-        gdf = await urban_api_gateway.get_services_scenario(scenario_id, centers_only=True)
+        gdf = await urban_api_gateway.get_services_scenario(scenario_id, centers_only=True, token=token)
+        gdf = gdf.to_crs(gdf.estimate_utm_crs())
         gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
         return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
     except Exception as e:
-        http_exception(404, f'No buildings found for scenario {scenario_id}', str(e))
+        print(f'No buildings found for scenario: {str(e)}')
 
