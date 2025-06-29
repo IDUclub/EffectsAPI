@@ -22,6 +22,9 @@ class DevelopmentDTO(BaseModel):
         description="Year of the chosen project functional-zone source.",
     )
 
+    def as_dict(self):
+        return self.model_dump(by_alias=False)
+
 
 class ContextDevelopmentDTO(DevelopmentDTO):
     context_func_zone_source: Optional[Literal["PZZ", "OSM", "User"]] = Field(

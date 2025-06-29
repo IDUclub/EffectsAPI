@@ -1,5 +1,3 @@
-# from .dto.development_dto import DevelopmentDTO, ContextDevelopmentDTO
-
 import pandas as pd
 import geopandas as gpd
 from blocksnet.machine_learning.regression import SocialRegressor
@@ -19,13 +17,55 @@ from app.effects_api.modules.service_type_service import adapt_service_types
 from .modules.context_service import get_context_blocks, get_context_functional_zones, get_context_buildings, \
     get_context_services
 
-from ..dependencies import urban_api_gateway
+from app.dependencies import urban_api_gateway
+from .dto.development_dto import ContextDevelopmentDTO, DevelopmentDTO
+from .schemas.development_response_schema import DevelopmentResponseSchema
+from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
 
 
+#TODO add caching service
 class EffectsService:
 
-    def __init__(self):
-        pass
+    @staticmethod
+    async def get_optimal_func_zone_data(
+            params: DevelopmentDTO | ContextDevelopmentDTO,
+            token: str
+    ) -> DevelopmentDTO:
+        """
+        Get optimal functional zone source and year for the project scenario.
+        If not provided, fetches the best available source and year.
+
+        Params:
+            params (DevelopmentDTO): DTO with scenario ID and optional
+        Returns:
+            DevelopmentDTO: DTO with updated functional zone source and year.
+        """
+
+        if not params.proj_func_zone_source or not params.proj_func_source_year:
+            (
+                params.proj_func_zone_source,
+                params.proj_func_source_year
+            ) = await urban_api_gateway.get_optimal_func_zone_request_data(
+                token,
+                params.scenario_id,
+                params.proj_func_zone_source,
+                params.proj_func_source_year
+            )
+            if isinstance(params, ContextDevelopmentDTO):
+                if not params.context_func_zone_source or not params.context_func_source_year:
+                    project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
+                    (
+                        params.context_func_zone_source,
+                        params.context_func_source_year
+                    ) = await urban_api_gateway.get_optimal_func_zone_request_data(
+                        token,
+                        project_id,
+                        params.context_func_zone_source,
+                        params.context_func_source_year,
+                        project=False
+                    )
+            return params
+        return params
 
     @staticmethod
     async def aggregate_blocks_layer_scenario(
@@ -33,7 +73,7 @@ class EffectsService:
             functional_zone_source: str = None,
             functional_zone_year: int = None,
             token: str = None
-            ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
         """
         Params:
         scenario_id : int
@@ -62,20 +102,22 @@ class EffectsService:
         scenario_blocks_crs = scenario_blocks_gdf.crs
         scenario_blocks_gdf['site_area'] = scenario_blocks_gdf.area
 
-        scenario_functional_zones = await get_scenario_functional_zones(scenario_id, token, functional_zone_source, functional_zone_year)
+        scenario_functional_zones = await get_scenario_functional_zones(scenario_id, token, functional_zone_source,
+                                                                        functional_zone_year)
         scenario_functional_zones = scenario_functional_zones.to_crs(scenario_blocks_crs)
         scenario_blocks_lu = assign_land_use(scenario_blocks_gdf, scenario_functional_zones, LAND_USE_RULES)
         scenario_blocks_gdf = scenario_blocks_gdf.join(scenario_blocks_lu.drop(columns=['geometry']))
         logger.success(f"Land use for scenario blocks have been assigned {scenario_id}")
 
         scenario_buildings_gdf = await get_scenario_buildings(scenario_id, token)
-        scenario_buildings_gdf = scenario_buildings_gdf.to_crs(scenario_blocks_crs)
         if scenario_buildings_gdf is not None:
             scenario_buildings_gdf = scenario_buildings_gdf.to_crs(scenario_blocks_gdf.crs)
             blocks_buildings, _ = aggregate_objects(scenario_blocks_gdf, scenario_buildings_gdf)
             scenario_blocks_gdf = scenario_blocks_gdf.join(
                 blocks_buildings.drop(columns=['geometry']).rename(columns={'count': 'count_buildings'}))
             scenario_blocks_gdf['count_buildings'] = scenario_blocks_gdf['count_buildings'].fillna(0).astype(int)
+            if "is_living" not in scenario_blocks_gdf.columns:
+                scenario_blocks_gdf["count_buildings"], scenario_blocks_gdf["is_living"] = 0, None
 
         logger.success(f"Buildings for scenario blocks have been aggregated {scenario_id}")
 
@@ -89,10 +131,11 @@ class EffectsService:
             scenario_blocks_services, _ = aggregate_objects(scenario_blocks_gdf, services)
             scenario_blocks_services['capacity'] = scenario_blocks_services['capacity'].fillna(0).astype(int)
             scenario_blocks_services['count'] = scenario_blocks_services['count'].fillna(0).astype(int)
-            scenario_blocks_gdf = scenario_blocks_gdf.join(scenario_blocks_services.drop(columns=['geometry']).rename(columns={
-                'capacity': f'capacity_{service_type}',
-                'count': f'count_{service_type}',
-            }))
+            scenario_blocks_gdf = scenario_blocks_gdf.join(
+                scenario_blocks_services.drop(columns=['geometry']).rename(columns={
+                    'capacity': f'capacity_{service_type}',
+                    'count': f'count_{service_type}',
+                }))
 
         scenario_blocks_gdf['is_project'] = True
         logger.success(f"Services for scenario blocks have been aggregated {scenario_id}")
@@ -132,14 +175,14 @@ class EffectsService:
         context_blocks_gdf = context_blocks_gdf.to_crs(context_blocks_crs)
         context_blocks_gdf['site_area'] = context_blocks_gdf.area
 
-        context_functional_zones = await get_context_functional_zones(project_id, context_functional_zone_source, context_functional_zone_year, token)
+        context_functional_zones = await get_context_functional_zones(project_id, context_functional_zone_source,
+                                                                      context_functional_zone_year, token)
         context_functional_zones = context_functional_zones.to_crs(context_blocks_crs)
         context_blocks_lu = assign_land_use(context_blocks_gdf, context_functional_zones, LAND_USE_RULES)
         context_blocks_gdf = context_blocks_gdf.join(context_blocks_lu.drop(columns=['geometry']))
         logger.success(f"Land use for context blocks have been assigned {scenario_id}")
 
         context_buildings_gdf = await get_context_buildings(project_id)
-        context_buildings_gdf = context_buildings_gdf.to_crs(context_blocks_crs)
 
         if context_buildings_gdf is not None:
             context_buildings_gdf = context_buildings_gdf.to_crs(context_blocks_gdf.crs)
@@ -147,6 +190,8 @@ class EffectsService:
             context_blocks_gdf = context_blocks_gdf.join(
                 context_blocks_buildings.drop(columns=['geometry']).rename(columns={'count': 'count_buildings'}))
             context_blocks_gdf['count_buildings'] = context_blocks_gdf['count_buildings'].fillna(0).astype(int)
+            if "is_living" not in context_blocks_gdf.columns:
+                context_blocks_gdf["count_buildings"], context_blocks_gdf["is_living"] = 0, None
         logger.success(f"Buildings for context blocks have been aggregated {scenario_id}")
 
         service_types = await urban_api_gateway.get_service_types()
@@ -158,14 +203,14 @@ class EffectsService:
             context_blocks_services, _ = aggregate_objects(context_blocks_gdf, services)
             context_blocks_services['capacity'] = context_blocks_services['capacity'].fillna(0).astype(int)
             context_blocks_services['count'] = context_blocks_services['count'].fillna(0).astype(int)
-            context_blocks_gdf = context_blocks_gdf.join(context_blocks_services.drop(columns=['geometry']).rename(columns={
-                'capacity': f'capacity_{service_type}',
-                'count': f'count_{service_type}',
-            }))
+            context_blocks_gdf = context_blocks_gdf.join(
+                context_blocks_services.drop(columns=['geometry']).rename(columns={
+                    'capacity': f'capacity_{service_type}',
+                    'count': f'count_{service_type}',
+                }))
         logger.success(f"Services for context blocks have been aggregated {scenario_id}")
 
         return context_blocks_gdf, context_buildings_gdf
-
 
     @staticmethod
     async def get_services_layer(scenario_id: int, token: str):
@@ -250,33 +295,30 @@ class EffectsService:
 
         return development_df
 
-    @staticmethod
     async def evaluate_master_plan(
-            scenario_id: int,
-            functional_zone_source: str = None,
-            functional_zone_year: int = None,
-            context_functional_zone_source: str = None,
-            context_functional_zone_year: int = None,
+            self,
+            params: ContextDevelopmentDTO,
             token: str = None
-    ) -> pd.DataFrame:
+    ) -> SocioEconomicResponseSchema:
         """
         End-to-end pipeline that fuses *project* and *context* blocks, enriches
         them with development parameters and produces socio-economic forecasts
         via ``SocialRegressor``.
 
         Params:
-        scenario_id : int
-            Scenario to evaluate.
-        functional_zone_source, functional_zone_year : str | int | None
-            Source and year for **project** functional zones.
-        context_functional_zone_source, context_functional_zone_year : str | int | None
-            Source and year for **context** functional zones.
+        params (ContextDevelopmentDTO): dto class containing following parameters:
+            scenario_id : int
+                Scenario to evaluate.
+            functional_zone_source, functional_zone_year : str | int | None
+                Source and year for **project** functional zones.
+            context_functional_zone_source, context_functional_zone_year : str | int | None
+                Source and year for **context** functional zones.
         token : str | None, default None
             Optional bearer token for Urban API.
 
         Returns:
-        pd.DataFrame
-            Two-row DataFrame with columns:
+        SocioEconomicResponseSchema:
+            pd.DataFrame.to_dict(orient="index") representation as schema with additional params keys:
             `pred`, `lower`, `upper`, `is_interval`
             – predicted socio-economic indicator and its prediction interval.
 
@@ -286,14 +328,15 @@ class EffectsService:
         3. Compute development parameters (`run_development_parameters`).
         4. Feed summarised indicators into SocialRegressor.
         """
-        logger.info('Evaluating master plan effects')
 
-        context_blocks, context_buildings = await EffectsService.aggregate_blocks_layer_context(
-            scenario_id, context_functional_zone_source, context_functional_zone_year, token
+        logger.info('Evaluating master plan effects')
+        params = await self.get_optimal_func_zone_data(params, token)
+        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
+            params.scenario_id, params.context_func_zone_source, params.context_func_source_year, token
         )
 
-        scenario_blocks, scenario_buildings = await EffectsService.aggregate_blocks_layer_scenario(
-            scenario_id, functional_zone_source, functional_zone_year, token
+        scenario_blocks, scenario_buildings = await self.aggregate_blocks_layer_scenario(
+            params.scenario_id, params.proj_func_zone_source, params.proj_func_source_year, token
         )
 
         scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
@@ -305,7 +348,7 @@ class EffectsService:
         cols = ['residential', 'business', 'recreation', 'industrial', 'transport', 'special', 'agriculture']
 
         blocks[cols] = blocks[cols].clip(upper=1)
-        development_df = await EffectsService.run_development_parameters(blocks)
+        development_df = await self.run_development_parameters(blocks)
 
         cols = ['build_floor_area', 'footprint_area', 'living_area', 'non_living_area', 'population']
         blocks[cols] = development_df[cols].values
@@ -327,53 +370,60 @@ class EffectsService:
         }
         result_df = pd.DataFrame.from_dict(result_data)
         result_df['is_interval'] = (result_df['pred'] <= result_df['upper']) & (result_df['pred'] >= result_df['lower'])
+        res = result_df.to_dict(orient="index")
+        res = {"socio_economic_prediction": res, "params_data": params.as_dict()}
+        return SocioEconomicResponseSchema(**res)
 
-        return result_df
+    async def calc_project_development(self, token: str, params: DevelopmentDTO) -> DevelopmentResponseSchema:
+        """
+        Function calculates development only for project with blocksnet
+        Args:
+            token (str): User token to access data from Urban API
+            params (DevelopmentDTO): development request params
+        Returns:
+            DevelopmentResponseSchema: Response schema with development indicators
+        """
 
-    # async def calc_project_development(self, token: str, params: DevelopmentDTO):
-    #     """
-    #     Function calculates development only for project with blocksnet
-    #     Args:
-    #         token (str): User token to access data from Urban API
-    #         params (DevelopmentDTO): development request params
-    #     Returns:
-    #         --
-    #     """
-    #
-    #     try:
-    #         if not params.proj_func_zone_source or not params.proj_func_zone_year:
-    #             (
-    #                 params.proj_func_zone_source,
-    #                 params.proj_func_source_year
-    #             ) = await urban_api_gateway.get_optimap_func_zone_request_data()
-    #         res = await self.aggregate_blocks_layer_scenario(
-    #             params.scenario_id,
-    #             token,
-    #             params.proj_func_zone_source,
-    #             params.proj_func_source_year
-    #         )
-    #         return res
-    #     except HTTPException as http_e:
-    #         logger.exception(http_e)
-    #         raise http_e
-    #     except Exception as e:
-    #         logger.exception(e)
-    #         raise http_exception(
-    #             500,
-    #             "Error during development calculation",
-    #             _input=params.__dict__,
-    #             _detail={
-    #                 "error": repr(e),
-    #             }
-    #         ) from e
-    #
-    # async def calc_context_development(self, params: ContextDevelopmentDTO):
-    #     """
-    #     Function calculates development for context  with project with blocksnet
-    #     Args:
-    #         params (DevelopmentDTO):
-    #     Returns:
-    #         --
-    #     """
-    #
-    #     pass
+        params = await self.get_optimal_func_zone_data(params, token)
+        blocks, buildings = await self.aggregate_blocks_layer_scenario(
+            params.scenario_id,
+            params.proj_func_zone_source,
+            params.proj_func_source_year,
+            token
+        )
+        res = await self.run_development_parameters(blocks)
+        res = res.to_dict(orient="list")
+        res.update({"params_data": params.as_dict()})
+        return DevelopmentResponseSchema(**res)
+
+    async def calc_context_development(self, token: str, params: ContextDevelopmentDTO) -> DevelopmentResponseSchema:
+        """
+        Function calculates development for context  with project with blocksnet
+        Args:
+            token (str): User token to access data from Urban API
+            params (DevelopmentDTO):
+        Returns:
+            DevelopmentResponseSchema: Response schema with development indicators
+        """
+
+        params = await self.get_optimal_func_zone_data(params, token)
+        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token
+        )
+        scenario_blocks, scenario_buildings = await self.aggregate_blocks_layer_scenario(
+            params.scenario_id,
+            params.proj_func_zone_source,
+            params.proj_func_source_year,
+            token
+        )
+        blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
+        res = await self.run_development_parameters(blocks)
+        res = res.to_dict(orient="list")
+        res.update({"params_data": params.as_dict()})
+        return DevelopmentResponseSchema(**res)
+
+
+effects_service = EffectsService()

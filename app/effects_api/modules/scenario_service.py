@@ -5,6 +5,7 @@ from blocksnet.preprocessing.imputing import impute_buildings
 from blocksnet.blocks.cutting import preprocess_urban_objects, cut_urban_blocks
 import geopandas as gpd
 import pandas as pd
+from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import urban_api_gateway
@@ -151,11 +152,19 @@ async def get_scenario_functional_zones(scenario_id: int, token: str, source: st
 async def get_scenario_buildings(scenario_id: int, token: str):
     try:
         gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_type_id=4, centers_only=True)
+        if gdf is None:
+            return None
         gdf = adapt_buildings(gdf.reset_index(drop=True))
         crs = gdf.estimate_utm_crs()
         return impute_buildings(gdf.to_crs(crs)).to_crs(4326)
     except Exception as e:
-        http_exception(404, f'No buildings found for scenario {scenario_id}', str(e))
+        logger.exception(e)
+        raise http_exception(
+            404,
+            f'No buildings found for scenario {scenario_id}',
+            _input={"scenario_id": scenario_id},
+            _detail={"error": repr(e)}
+        ) from e
 
 
 async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame, token: str):

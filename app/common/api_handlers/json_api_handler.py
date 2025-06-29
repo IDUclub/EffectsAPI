@@ -57,8 +57,8 @@ class JSONAPIHandler:
             )
 
     @staticmethod
-    async def check_request_params(
-        params: dict[str, str | int | float | bool] | None,
+    async def _check_request_params(
+            params: dict[str, str | int | float | bool] | None,
     ) -> dict | None:
         """
         Function checks request parameters
@@ -101,6 +101,7 @@ class JSONAPIHandler:
                     session=session,
                 )
         url = self.base_url + endpoint_url
+        params = await self._check_request_params(params)
         async with session.get(
                 url=url,
                 headers=headers,
@@ -131,7 +132,7 @@ class JSONAPIHandler:
             params: dict | None = None,
             data: dict | None = None,
             session: aiohttp.ClientSession | None = None,
-        ) -> dict | list:
+    ) -> dict | list:
         """Function to post data from api
         Args:
             endpoint_url (str): Endpoint url
@@ -153,11 +154,12 @@ class JSONAPIHandler:
                     session=session,
                 )
         url = self.base_url + endpoint_url
+        params = await self._check_request_params(params)
         async with session.post(
-            url=url,
-            headers=headers,
-            params=params,
-            data=data,
+                url=url,
+                headers=headers,
+                params=params,
+                data=data,
         ) as response:
             result = await self._check_response_status(response)
             if not result:
@@ -198,6 +200,7 @@ class JSONAPIHandler:
                     session=session,
                 )
         url = self.base_url + endpoint_url
+        params = await self._check_request_params(params)
         async with session.put(
                 url=url,
                 headers=headers,
@@ -243,6 +246,7 @@ class JSONAPIHandler:
                     session=session,
                 )
         url = self.base_url + endpoint_url
+        params = await self._check_request_params(params)
         async with session.delete(
                 url=url,
                 headers=headers,
