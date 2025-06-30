@@ -122,9 +122,6 @@ async def _get_best_functional_zones_source(
             if not row.empty:
                 return year, s
 
-    # else:
-    #     raise http_exception(404, "No source or year were found:", [source, year])
-
     for s in SOURCES_PRIORITY:
         rows = sources_df.query("source == @s")
         if not rows.empty:
