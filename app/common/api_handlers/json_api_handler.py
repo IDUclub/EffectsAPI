@@ -45,14 +45,14 @@ class JSONAPIHandler:
             raise http_exception(
                 response.status,
                 "Couldn't get data from API",
-                _input=response.url.__str__(),
+                _input=str(response.url),
                 _detail=response_info,
             )
         else:
             raise http_exception(
                 response.status,
                 "Couldn't get data from API",
-                _input=response.url.__str__(),
+                _input=str(response.url),
                 _detail=await response.json(),
             )
 
