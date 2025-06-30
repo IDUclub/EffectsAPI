@@ -1,19 +1,21 @@
-import geopandas as gpd
-import numpy as np
-import pandas as pd
+from typing import Optional
+
 import shapely
-from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
-from blocksnet.preprocessing.imputing import impute_buildings, impute_services
+import numpy as np
+from blocksnet.preprocessing.imputing import impute_services
+from blocksnet.preprocessing.imputing import impute_buildings
+from blocksnet.blocks.cutting import preprocess_urban_objects, cut_urban_blocks
+import geopandas as gpd
+import pandas as pd
 from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import urban_api_gateway
 from app.effects_api.modules.buildings_service import adapt_buildings
-from app.effects_api.modules.functional_sources_service import \
-    adapt_functional_zones
+from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.services_service import adapt_services
 
-SOURCES_PRIORITY = ["PZZ", "OSM", "User"]
+SOURCES_PRIORITY = ['PZZ', 'OSM', "User"]
 
 
 def close_gaps(gdf, tolerance):  # taken from momepy
@@ -48,39 +50,46 @@ def close_gaps(gdf, tolerance):  # taken from momepy
 
 
 async def _get_project_boundaries(project_id: int):
-    return gpd.GeoDataFrame(
-        geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326
-    )
+    return gpd.GeoDataFrame(geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326)
 
 
 async def _get_scenario_roads(scenario_id: int, token: str):
-    gdf = await urban_api_gateway.get_physical_objects_scenario(
-        scenario_id, token, physical_object_function_id=26
-    )
-    return gdf[["geometry"]].reset_index(drop=True)
+    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_function_id=26)
+    if gdf is None:
+        return None
+    return gdf[['geometry']].reset_index(drop=True)
 
 
 async def _get_scenario_water(scenario_id: int, token: str):
-    gdf = await urban_api_gateway.get_physical_objects_scenario(
-        scenario_id, token, physical_object_function_id=4
-    )
-    return gdf[["geometry"]].reset_index(drop=True)
+    gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_function_id=4)
+    if gdf is None:
+        return None
+    return gdf[['geometry']].reset_index(drop=True)
 
 
-async def _get_scenario_blocks(
-    user_scenario_id: int, base_scenario_id: int, boundaries: gpd.GeoDataFrame, token
-) -> gpd.GeoDataFrame:
+async def _get_scenario_blocks(user_scenario_id: int, base_scenario_id: int,
+                         boundaries: gpd.GeoDataFrame, token) -> gpd.GeoDataFrame:
     crs = boundaries.crs
     boundaries.geometry = boundaries.buffer(-1)
 
     water = await _get_scenario_water(user_scenario_id, token)
-    water = water.to_crs(crs)
+    if water is not None and not water.empty:
+        water = water.to_crs(crs)
+        water = water.explode()
     user_roads = await _get_scenario_roads(user_scenario_id, token)
-    user_roads = user_roads.to_crs(crs)
-    base_roads = await _get_scenario_roads(base_scenario_id, token)
-    base_roads = base_roads.to_crs(crs)
-    roads = pd.concat([user_roads, base_roads]).reset_index(drop=True)
-    roads.geometry = close_gaps(roads, 1)
+    if user_roads is not None and not user_roads.empty:
+        user_roads = user_roads.to_crs(crs)
+        user_roads = user_roads.explode()
+    base_roads =await _get_scenario_roads(base_scenario_id, token)
+    if base_roads is not None and not base_roads.empty:
+        base_roads = base_roads.to_crs(crs)
+        base_roads = base_roads.explode()
+    if base_roads is not None and not base_roads.empty and user_roads is not None and not user_roads.empty:
+        roads = pd.concat([user_roads, base_roads]).reset_index(drop=True)
+        roads.geometry = close_gaps(roads, 1)
+        roads = roads.explode(column='geometry')
+    else:
+        raise http_exception(404, "No objects found for polygons cutting")
 
     lines, polygons = preprocess_urban_objects(roads, None, water)
     blocks = cut_urban_blocks(boundaries, lines, polygons)
@@ -89,16 +98,16 @@ async def _get_scenario_blocks(
 
 async def _get_scenario_info(scenario_id: int, token: str) -> tuple[int, int]:
     scenario = await urban_api_gateway.get_scenario(scenario_id, token)
-    project_id = scenario["project"]["project_id"]
+    project_id = scenario['project']['project_id']
     project = await urban_api_gateway.get_project(project_id)
-    base_scenario_id = project["base_scenario"]["id"]
+    base_scenario_id = project['base_scenario']['id']
     return project_id, base_scenario_id
 
 
 async def _get_best_functional_zones_source(
-    sources_df: pd.DataFrame,
-    source: str | None = None,
-    year: int | None = None,
+        sources_df: pd.DataFrame,
+        source: str | None = None,
+        year: int | None = None,
 ) -> tuple[int | None, str | None]:
     """
     Pick the (year, source) pair that should be fetched.
@@ -142,28 +151,20 @@ async def get_scenario_blocks(user_scenario_id: int, token: str) -> gpd.GeoDataF
     crs = project_boundaries.estimate_utm_crs()
     project_boundaries = project_boundaries.to_crs(crs)
 
-    return await _get_scenario_blocks(
-        user_scenario_id, base_scenario_id, project_boundaries, token
-    )
+    return await _get_scenario_blocks(user_scenario_id, base_scenario_id, project_boundaries, token)
 
 
-async def get_scenario_functional_zones(
-    scenario_id: int, token: str, source: str = None, year: int = None
-) -> gpd.GeoDataFrame:
-    source, year = await urban_api_gateway.get_optimal_func_zone_request_data(
-        token, scenario_id, year, source
-    )
-    functional_zones = await urban_api_gateway.get_functional_zones_scenario(
-        scenario_id, token, year, source
-    )
+async def get_scenario_functional_zones(scenario_id: int, token: str, source: str = None, year: int = None) -> gpd.GeoDataFrame:
+    functional_zones = await urban_api_gateway.get_functional_zones_scenario(scenario_id, token, year, source)
+    functional_zones = functional_zones.loc[
+        functional_zones.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
+    ].reset_index(drop=True)
     return adapt_functional_zones(functional_zones)
 
 
 async def get_scenario_buildings(scenario_id: int, token: str):
     try:
-        gdf = await urban_api_gateway.get_physical_objects_scenario(
-            scenario_id, token, physical_object_type_id=4, centers_only=True
-        )
+        gdf = await urban_api_gateway.get_physical_objects_scenario(scenario_id, token, physical_object_type_id=4, centers_only=True)
         if gdf is None:
             return None
         gdf = adapt_buildings(gdf.reset_index(drop=True))
@@ -173,19 +174,15 @@ async def get_scenario_buildings(scenario_id: int, token: str):
         logger.exception(e)
         raise http_exception(
             404,
-            f"No buildings found for scenario {scenario_id}",
+            f'No buildings found for scenario {scenario_id}',
             _input={"scenario_id": scenario_id},
-            _detail={"error": repr(e)},
+            _detail={"error": repr(e)}
         ) from e
 
 
-async def get_scenario_services(
-    scenario_id: int, service_types: pd.DataFrame, token: str
-):
+async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame, token: str):
     try:
-        gdf = await urban_api_gateway.get_services_scenario(
-            scenario_id, centers_only=True, token=token
-        )
+        gdf = await urban_api_gateway.get_services_scenario(scenario_id, centers_only=True, token=token)
         gdf = gdf.to_crs(gdf.estimate_utm_crs())
         gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
         return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
