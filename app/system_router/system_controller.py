@@ -8,7 +8,7 @@ LOGS_PATH = absolute_app_path / f"{config.get('LOG_NAME')}"
 system_router = APIRouter(prefix="/system", tags=["System"])
 
 
-#TODO use structlog instead of loguru
+# TODO use structlog instead of loguru
 @system_router.get("/logs")
 async def get_logs():
     """
