@@ -13,8 +13,8 @@ async def handle_controller_exception(func, is_async: bool = True, **kwargs):
             return await func(**kwargs)
         else:
             return func(**kwargs)
-    except HTTPException as http_e:
-        raise http_e
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(e)
         raise http_exception(
