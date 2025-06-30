@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Enables env file
-ENV APP_ENV=development
+ENV APP_ENV=production
 
 #add pypi mirror to config
 COPY pip.conf /etc/xdg/pip/pip.conf

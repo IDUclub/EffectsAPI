@@ -125,7 +125,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-app/.env.development
 .env.*
 .venv
 env/
@@ -171,4 +170,3 @@ gdf_with_obj.geojson
 boundaries.parquet
 roads.parquet
 water.parquet
-*.ipynb
