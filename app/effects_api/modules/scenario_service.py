@@ -10,6 +10,7 @@ from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import urban_api_gateway
+from app.effects_api.constants.const import ROADS_ID, WATER_ID, LIVING_BUILDINGS_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import \
     adapt_functional_zones
@@ -57,7 +58,7 @@ async def _get_project_boundaries(project_id: int):
 
 async def _get_scenario_roads(scenario_id: int, token: str):
     gdf = await urban_api_gateway.get_physical_objects_scenario(
-        scenario_id, token, physical_object_function_id=26
+        scenario_id, token, physical_object_function_id=ROADS_ID
     )
     if gdf is None:
         return None
@@ -66,7 +67,7 @@ async def _get_scenario_roads(scenario_id: int, token: str):
 
 async def _get_scenario_water(scenario_id: int, token: str):
     gdf = await urban_api_gateway.get_physical_objects_scenario(
-        scenario_id, token, physical_object_function_id=4
+        scenario_id, token, physical_object_function_id=WATER_ID
     )
     if gdf is None:
         return None
@@ -183,7 +184,7 @@ async def get_scenario_functional_zones(
 async def get_scenario_buildings(scenario_id: int, token: str):
     try:
         gdf = await urban_api_gateway.get_physical_objects_scenario(
-            scenario_id, token, physical_object_type_id=4, centers_only=True
+            scenario_id, token, physical_object_type_id=LIVING_BUILDINGS_ID, centers_only=True
         )
         if gdf is None:
             return None

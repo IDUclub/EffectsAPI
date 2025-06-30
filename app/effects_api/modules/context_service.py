@@ -4,6 +4,7 @@ from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
 from blocksnet.preprocessing.imputing import impute_buildings, impute_services
 
 from app.dependencies import urban_api_gateway
+from app.effects_api.constants.const import ROADS_ID, LIVING_BUILDINGS_ID, WATER_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import \
     adapt_functional_zones
@@ -30,14 +31,14 @@ async def _get_context_boundaries(project_id: int) -> gpd.GeoDataFrame:
 
 async def _get_context_roads(project_id: int):
     gdf = await urban_api_gateway.get_physical_objects(
-        project_id, physical_object_function_id=26
+        project_id, physical_object_function_id=ROADS_ID
     )
     return gdf[["geometry"]].reset_index(drop=True)
 
 
 async def _get_context_water(project_id: int):
     gdf = await urban_api_gateway.get_physical_objects(
-        project_id, physical_object_function_id=4
+        project_id, physical_object_function_id=WATER_ID
     )
     return gdf[["geometry"]].reset_index(drop=True)
 
@@ -90,7 +91,7 @@ async def get_context_functional_zones(
 
 async def get_context_buildings(project_id: int):
     gdf = await urban_api_gateway.get_physical_objects(
-        project_id, physical_object_type_id=4, centers_only=True
+        project_id, physical_object_type_id=LIVING_BUILDINGS_ID, centers_only=True
     )
     gdf = adapt_buildings(gdf.reset_index(drop=True))
     crs = gdf.estimate_utm_crs()

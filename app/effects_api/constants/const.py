@@ -109,3 +109,7 @@ BUILDINGS_RULES = {
     ],
     "population": [["properties", "population_balanced"]],
 }
+
+LIVING_BUILDINGS_ID = 4
+ROADS_ID = 26
+WATER_ID = 4
