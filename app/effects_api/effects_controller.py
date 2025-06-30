@@ -11,11 +11,11 @@ from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
 
 
-development_router = APIRouter(prefix='/redevelopment', tags=['Effects'])
+development_router = APIRouter(prefix='/development', tags=['Effects'])
 
 
-@development_router.get("/project_redevelopment", response_model=DevelopmentResponseSchema)
-async def get_project_redevelopment(
+@development_router.get("/project_development", response_model=DevelopmentResponseSchema)
+async def get_project_development(
         params: Annotated[DevelopmentDTO, Depends(DevelopmentDTO)],
         token: str = Depends(verify_token),
 ) -> DevelopmentResponseSchema:
@@ -23,8 +23,8 @@ async def get_project_redevelopment(
     return await handle_controller_exception(effects_service.calc_project_development, token=token, params=params)
 
 
-@development_router.get("/context_redevelopment", response_model=DevelopmentResponseSchema)
-async def get_context_redevelopment(
+@development_router.get("/context_development", response_model=DevelopmentResponseSchema)
+async def get_context_development(
         params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
         token: str = Depends(verify_token),
 ) -> DevelopmentResponseSchema:

@@ -16,7 +16,7 @@ LAND_USE_RULES = {
 }
 
 
-# UrbanDB to Blocksnet service mapping
+#TODO add map autogeneration
 SERVICE_TYPES_MAPPING = {
     # basic
     1: 'park',
