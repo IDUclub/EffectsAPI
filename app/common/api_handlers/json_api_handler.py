@@ -72,7 +72,7 @@ class JSONAPIHandler:
             for key, param in params.items():
                 if isinstance(param, bool):
                     params[key] = str(param).lower()
-
+        return params
 
     async def get(
             self,
