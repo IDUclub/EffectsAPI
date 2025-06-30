@@ -139,9 +139,7 @@ async def get_scenario_blocks(user_scenario_id: int, token: str) -> gpd.GeoDataF
 
 
 async def get_scenario_functional_zones(scenario_id: int, token: str, source: str = None, year: int = None) -> gpd.GeoDataFrame:
-    sources_df = await urban_api_gateway.get_functional_zones_sources_scenario(scenario_id, token)
-    year, source = await _get_best_functional_zones_source(sources_df, source, year)
-    # year, source = await urban_api_gateway.get_optimal_func_zone_request_data(token, scenario_id, year, source)
+    source, year = await urban_api_gateway.get_optimal_func_zone_request_data(token, scenario_id, year, source)
     functional_zones = await urban_api_gateway.get_functional_zones_scenario(scenario_id, token, year, source)
     return adapt_functional_zones(functional_zones)
 
@@ -171,5 +169,4 @@ async def get_scenario_services(scenario_id: int, service_types: pd.DataFrame, t
         gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
         return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
     except Exception as e:
-        print(f'No buildings found for scenario: {str(e)}')
-
+        logger.error("No buildings found for scenario", e)
