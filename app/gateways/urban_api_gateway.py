@@ -1,9 +1,9 @@
 import json
+from typing import Any, Dict, Literal, Optional
+
 import geopandas as gpd
 import pandas as pd
 import shapely
-from typing import Any, Dict, Literal, Optional
-
 from loguru import logger
 
 from app.common.api_handlers.json_api_handler import JSONAPIHandler
@@ -17,58 +17,43 @@ class UrbanAPIGateway:
 
     # TODO context
     async def get_physical_objects(
-            self,
-            project_id: int,
-            **kwargs: Any
+        self, project_id: int, **kwargs: Any
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/physical_objects_with_geometry",
             params=kwargs,
         )
         features = res["features"]
-        return (
-            gpd.GeoDataFrame.from_features(features, crs=4326)
-            .set_index("physical_object_id")
+        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+            "physical_object_id"
         )
 
-    async def get_services(
-            self,
-            project_id: int,
-            **kwargs: Any
-    ) -> gpd.GeoDataFrame:
+    async def get_services(self, project_id: int, **kwargs: Any) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/services_with_geometry",
-            params=kwargs
+            params=kwargs,
         )
         features = res["features"]
-        return (
-            gpd.GeoDataFrame.from_features(features, crs=4326)
-            .set_index("service_id")
+        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+            "service_id"
         )
 
-    async def get_functional_zones_sources(
-            self,
-            project_id: int
-    ) -> pd.DataFrame:
+    async def get_functional_zones_sources(self, project_id: int) -> pd.DataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/functional_zone_sources"
         )
         return pd.DataFrame(res)
 
     async def get_functional_zones(
-            self,
-            project_id: int,
-            year: int,
-            source: int
+        self, project_id: int, year: int, source: int
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/functional_zones",
-            params={"year": year, "source": source}
+            params={"year": year, "source": source},
         )
         features = res["features"]
-        return (
-            gpd.GeoDataFrame.from_features(features, crs=4326)
-            .set_index("functional_zone_id")
+        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+            "functional_zone_id"
         )
 
     async def get_project(self, project_id: int) -> Dict[str, Any]:
@@ -76,9 +61,7 @@ class UrbanAPIGateway:
         return res
 
     async def get_project_geometry(self, project_id: int):
-        res = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/territory"
-        )
+        res = await self.json_handler.get(f"/api/v1/projects/{project_id}/territory")
         geometry_json = json.dumps(res["geometry"])
         return shapely.from_geojson(geometry_json)
 
@@ -93,21 +76,23 @@ class UrbanAPIGateway:
         except Exception as e:
             logger.exception(e)
             raise http_exception(
-            404,
-            f"Scenario info for ID {target_scenario_id}  is missing",
-            _input={"target_scenario_id": target_scenario_id},
-            _detail={"error": repr(e)}
+                404,
+                f"Scenario info for ID {target_scenario_id}  is missing",
+                _input={"target_scenario_id": target_scenario_id},
+                _detail={"error": repr(e)},
             ) from e
 
     async def get_scenario(self, scenario_id: int, token: str) -> Dict[str, Any]:
         headers = {"Authorization": f"Bearer {token}"}
-        res = await self.json_handler.get(f"/api/v1/scenarios/{scenario_id}", headers=headers)
+        res = await self.json_handler.get(
+            f"/api/v1/scenarios/{scenario_id}", headers=headers
+        )
         return res
 
     async def get_functional_zones_sources_scenario(
-            self,
-            scenario_id: int,
-            token: str,
+        self,
+        scenario_id: int,
+        token: str,
     ) -> pd.DataFrame:
         headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
@@ -117,65 +102,52 @@ class UrbanAPIGateway:
         return pd.DataFrame(res)
 
     async def get_functional_zones_scenario(
-            self,
-            scenario_id: int,
-            token: str,
-            year: int,
-            source: str
+        self, scenario_id: int, token: str, year: int, source: str
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/functional_zones",
             headers={"Authorization": f"Bearer {token}"},
-            params={"year": year, "source": source}
+            params={"year": year, "source": source},
         )
         features = res["features"]
-        return (
-            gpd.GeoDataFrame.from_features(features, crs=4326)
-            .set_index("functional_zone_id")
+        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+            "functional_zone_id"
         )
 
     async def get_physical_objects_scenario(
-            self,
-            scenario_id: int,
-            token: str,
-            **kwargs: Any
+        self, scenario_id: int, token: str, **kwargs: Any
     ) -> gpd.GeoDataFrame | None:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/physical_objects_with_geometry",
             headers={"Authorization": f"Bearer {token}"},
-            params=kwargs
+            params=kwargs,
         )
         if res["features"]:
-            return (
-                gpd.GeoDataFrame.from_features(res, crs=4326)
-                .set_index("physical_object_id")
+            return gpd.GeoDataFrame.from_features(res, crs=4326).set_index(
+                "physical_object_id"
             )
         return None
 
     async def get_services_scenario(
-            self,
-            scenario_id: int,
-            token: str,
-            **kwargs: Any
+        self, scenario_id: int, token: str, **kwargs: Any
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/services_with_geometry",
             headers={"Authorization": f"Bearer {token}"},
-            params=kwargs
+            params=kwargs,
         )
         features = res["features"]
-        return (
-            gpd.GeoDataFrame.from_features(features, crs=4326)
-            .set_index("service_id")
+        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+            "service_id"
         )
 
     async def get_optimal_func_zone_request_data(
-            self,
-            token: str,
-            data_id: int,
-            source: Literal["PZZ", "OSM", "User"] | None,
-            year: int | None,
-            project: bool = True
+        self,
+        token: str,
+        data_id: int,
+        source: Literal["PZZ", "OSM", "User"] | None,
+        year: int | None,
+        project: bool = True,
     ) -> tuple[str, int]:
         """
         Function retrieves best matching zone sources based on given source and year.
@@ -193,9 +165,9 @@ class UrbanAPIGateway:
         """
 
         async def _get_optimal_source(
-                sources_data: pd.DataFrame,
-                target_year: int | None,
-                is_project: bool,
+            sources_data: pd.DataFrame,
+            target_year: int | None,
+            is_project: bool,
         ) -> tuple[str, int]:
             """
             Function estimates the best source and year
@@ -219,7 +191,9 @@ class UrbanAPIGateway:
                     sources_data = sources_data[sources_data["source"] == i]
                     source_name = sources_data["source"].iloc[0]
                     if year:
-                        source_year = sources_data[sources_data["year"] == target_year].iloc[0]
+                        source_year = sources_data[
+                            sources_data["year"] == target_year
+                        ].iloc[0]
                     else:
                         source_year = sources_data["year"].max()
                     return source_name, int(source_year)
@@ -230,7 +204,7 @@ class UrbanAPIGateway:
                     "source": source,
                     "year": year,
                     "is_project": is_project,
-                }
+                },
             )
 
         if not project and source == "User":
@@ -244,18 +218,17 @@ class UrbanAPIGateway:
                 },
                 _detail={
                     "available_sources": ["PZZ", "OSM"],
-                }
+                },
             )
         headers = {"Authorization": f"Bearer {token}"}
         if project:
             available_sources = await self.json_handler.get(
-                f"/api/v1/scenarios/{data_id}/functional_zone_sources",
-                headers=headers
+                f"/api/v1/scenarios/{data_id}/functional_zone_sources", headers=headers
             )
         else:
             available_sources = await self.json_handler.get(
                 f"/api/v1/projects/{data_id}/context/functional_zone_sources",
-                headers=headers
+                headers=headers,
             )
         sources_df = pd.DataFrame.from_records(available_sources)
         if not source:
@@ -265,12 +238,14 @@ class UrbanAPIGateway:
             return await _get_optimal_source(source_df, year, project)
 
     async def get_project_id(
-            self,
-            scenario_id: int,
-            token: str | None = None,
+        self,
+        scenario_id: int,
+        token: str | None = None,
     ) -> int:
         endpoint = f"/api/v1/scenarios/{scenario_id}"
-        response = await self.json_handler.get(endpoint, headers={"Authorization": f"Bearer {token}"})
+        response = await self.json_handler.get(
+            endpoint, headers={"Authorization": f"Bearer {token}"}
+        )
         project_id = response.get("project", {}).get("project_id")
         if project_id is None:
             raise http_exception(
@@ -281,18 +256,22 @@ class UrbanAPIGateway:
 
         return project_id
 
-    async def get_all_project_info(self, project_id: int, token: Optional[str] = None) -> dict:
+    async def get_all_project_info(
+        self, project_id: int, token: Optional[str] = None
+    ) -> dict:
         url = f"/api/v1/projects/{project_id}"
         try:
-            response = await self.json_handler.get(url, headers={"Authorization": f"Bearer {token}"})
+            response = await self.json_handler.get(
+                url, headers={"Authorization": f"Bearer {token}"}
+            )
             return response
         except Exception as e:
             logger.exception(e)
             raise http_exception(
-            404,
-            f"Project info for ID {project_id} is missing",
-            _input={"project_id": project_id},
-            _detail={"error": repr(e)}
+                404,
+                f"Project info for ID {project_id} is missing",
+                _input={"project_id": project_id},
+                _detail={"error": repr(e)},
             ) from e
 
     async def get_service_types(self, **kwargs):
@@ -314,33 +293,34 @@ class UrbanAPIGateway:
             for it in items
         ]
 
-        return (
-            pd.DataFrame(rows)
-            .set_index("service_type_id")
-        )
+        return pd.DataFrame(rows).set_index("service_type_id")
 
     async def get_social_values(self, **kwargs):
-        res = await self.json_handler.get('/api/v1/social_values', params=kwargs)
-        return pd.DataFrame(res).set_index('soc_value_id')
+        res = await self.json_handler.get("/api/v1/social_values", params=kwargs)
+        return pd.DataFrame(res).set_index("soc_value_id")
 
     async def get_social_value_service_types(self, soc_value_id: int, **kwargs):
-        data = await self.json_handler.get(f'/api/v1/social_values/{soc_value_id}/service_types', params=kwargs)
+        data = await self.json_handler.get(
+            f"/api/v1/social_values/{soc_value_id}/service_types", params=kwargs
+        )
         if not data:
             return None
 
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
-            items = data.get('service_types') or data.get('data') or []
+            items = data.get("service_types") or data.get("data") or []
         else:
             items = []
 
         rows = []
         for it in items:
-            rows.append({
-                'soc_value_id': it.get('soc_value_id'),
-            })
-        df = pd.DataFrame(rows).set_index('soc_value_id')
+            rows.append(
+                {
+                    "soc_value_id": it.get("soc_value_id"),
+                }
+            )
+        df = pd.DataFrame(rows).set_index("soc_value_id")
         return df
 
     async def get_service_type_social_values(self, service_type_id: int, **kwargs):
@@ -361,14 +341,13 @@ class UrbanAPIGateway:
         return df
 
     async def get_indicators(self, parent_id: int | None = None, **kwargs):
-        res = await self.json_handler.get('/api/v1/indicators_by_parent', params={
-            'parent_id': parent_id,
-            **kwargs
-        })
-        return pd.DataFrame(res).set_index('indicator_id')
+        res = await self.json_handler.get(
+            "/api/v1/indicators_by_parent", params={"parent_id": parent_id, **kwargs}
+        )
+        return pd.DataFrame(res).set_index("indicator_id")
 
     async def get_territory_geometry(self, territory_id: int):
-        res = await self.json_handler.get(f'/api/v1/territory/{territory_id}')
+        res = await self.json_handler.get(f"/api/v1/territory/{territory_id}")
         geom = res["geometry"]
         if isinstance(geom, dict):
             geom = json.dumps(geom)

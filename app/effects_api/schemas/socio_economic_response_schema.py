@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator
 
-from app.effects_api.dto.development_dto import DevelopmentDTO, ContextDevelopmentDTO
+from app.effects_api.dto.development_dto import (ContextDevelopmentDTO,
+                                                 DevelopmentDTO)
 
 
 class SocioEconomicParams(BaseModel):
@@ -20,4 +21,3 @@ class SocioEconomicResponseSchema(BaseModel):
 
     socio_economic_prediction: dict[str, SocioEconomicParams]
     params_data: DevelopmentDTO | ContextDevelopmentDTO
-

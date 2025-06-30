@@ -1,8 +1,8 @@
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
-from pydantic import BaseModel, Field, model_validator
-
-from app.effects_api.dto.development_dto import DevelopmentDTO, ContextDevelopmentDTO
+from app.effects_api.dto.development_dto import (ContextDevelopmentDTO,
+                                                 DevelopmentDTO)
 
 
 class DevelopmentResponseSchema(BaseModel):

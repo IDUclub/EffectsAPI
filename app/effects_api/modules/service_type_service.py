@@ -1,16 +1,16 @@
 import asyncio
-from typing import Optional, List
+from typing import List, Optional
 
-from app.dependencies import urban_api_gateway
 import pandas as pd
 from blocksnet.config import service_types_config
 
+from app.dependencies import urban_api_gateway
 from app.effects_api.constants.const import SERVICE_TYPES_MAPPING
 
 for st_id, st_name in SERVICE_TYPES_MAPPING.items():
     if st_name is None:
         continue
-    assert st_name in service_types_config, f'{st_id}:{st_name} not in config'
+    assert st_name in service_types_config, f"{st_id}:{st_name} not in config"
 
 
 async def _adapt_name(service_type_id: int):
@@ -18,7 +18,9 @@ async def _adapt_name(service_type_id: int):
 
 
 async def _adapt_social_values(service_type_id: int):
-    social_values = await urban_api_gateway.get_service_type_social_values(service_type_id)
+    social_values = await urban_api_gateway.get_service_type_social_values(
+        service_type_id
+    )
     if social_values is None:
         return None
     else:
