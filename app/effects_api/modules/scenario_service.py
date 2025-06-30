@@ -10,7 +10,8 @@ from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import urban_api_gateway
-from app.effects_api.constants.const import ROADS_ID, WATER_ID, LIVING_BUILDINGS_ID
+from app.effects_api.constants.const import (LIVING_BUILDINGS_ID, ROADS_ID,
+                                             WATER_ID)
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import \
     adapt_functional_zones
@@ -184,7 +185,10 @@ async def get_scenario_functional_zones(
 async def get_scenario_buildings(scenario_id: int, token: str):
     try:
         gdf = await urban_api_gateway.get_physical_objects_scenario(
-            scenario_id, token, physical_object_type_id=LIVING_BUILDINGS_ID, centers_only=True
+            scenario_id,
+            token,
+            physical_object_type_id=LIVING_BUILDINGS_ID,
+            centers_only=True,
         )
         if gdf is None:
             return None

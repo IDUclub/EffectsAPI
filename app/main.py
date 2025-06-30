@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from app.effects_api.effects_controller import development_router
 from app.system_router.system_controller import system_router
 
-#TODO add app version
+# TODO add app version
 app = FastAPI(
     title="Effects API",
     description="API for calculating effects of territory transformation with BlocksNet library",
