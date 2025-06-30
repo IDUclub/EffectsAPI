@@ -71,9 +71,8 @@ class JSONAPIHandler:
         if params:
             for key, param in params.items():
                 if isinstance(param, bool):
-                    params[key] = {True: "true", False: "false"}[param]
-            return params
-        return params
+                    params[key] = str(param).lower()
+
 
     async def get(
             self,
