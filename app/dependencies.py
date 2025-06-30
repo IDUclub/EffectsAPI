@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 from loguru import logger
 from iduconfig import Config
@@ -16,10 +17,11 @@ logger.add(
 )
 logger.add(".log", level=log_level, format=log_format, colorize=False, backtrace=True, diagnose=True)
 
+absolute_app_path = Path().absolute()
 config = Config()
 
 logger.add(
-    ".log",
+    absolute_app_path / f"{config.get('LOG_NAME')}",
     format=log_format,
     level="INFO",
 )
