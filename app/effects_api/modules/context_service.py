@@ -4,13 +4,13 @@ from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
 from blocksnet.preprocessing.imputing import impute_buildings, impute_services
 
 from app.dependencies import urban_api_gateway
-from app.effects_api.constants.const import (LIVING_BUILDINGS_ID, ROADS_ID,
-                                             WATER_ID)
+from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
-from app.effects_api.modules.functional_sources_service import \
-    adapt_functional_zones
+from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.scenario_service import (
-    _get_best_functional_zones_source, close_gaps)
+    _get_best_functional_zones_source,
+    close_gaps,
+)
 from app.effects_api.modules.services_service import adapt_services
 
 

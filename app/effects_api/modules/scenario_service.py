@@ -10,11 +10,9 @@ from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import urban_api_gateway
-from app.effects_api.constants.const import (LIVING_BUILDINGS_ID, ROADS_ID,
-                                             WATER_ID)
+from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
-from app.effects_api.modules.functional_sources_service import \
-    adapt_functional_zones
+from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.services_service import adapt_services
 
 SOURCES_PRIORITY = ["PZZ", "OSM", "User"]
