@@ -42,7 +42,13 @@ class EffectsService:
     def __init__(
         self,
     ):
+        self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
+
+    def model_dump(
+        self,
+    ):
+        return {k: str(v) for k, v in self.__dict__.items()}
 
     @staticmethod
     async def get_optimal_func_zone_data(
@@ -421,7 +427,7 @@ class EffectsService:
             result_df["pred"] >= result_df["lower"]
         )
         res = result_df.to_dict(orient="index")
-        return SocioEconomicSchema(**{"socio_economic_prediction": res})
+        return SocioEconomicSchema(socio_economic_prediction=res)
 
     async def evaluate_master_plan(
         self, params: SocioEconomicPredictionDTO, token: str = None
@@ -558,7 +564,7 @@ class EffectsService:
         )
         res = await self.run_development_parameters(blocks)
         res = res.to_dict(orient="list")
-        res.update({"params_data": params.as_dict()})
+        res.update({"params_data": params.model_dump()})
         return DevelopmentResponseSchema(**res)
 
     async def calc_context_development(
@@ -591,7 +597,7 @@ class EffectsService:
         blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
         res = await self.run_development_parameters(blocks)
         res = res.to_dict(orient="list")
-        res.update({"params_data": params.as_dict()})
+        res.update({"params_data": params.model_dump()})
         return DevelopmentResponseSchema(**res)
 
 

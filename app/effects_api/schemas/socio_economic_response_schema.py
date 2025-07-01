@@ -9,10 +9,10 @@ from .output_maps import pred_columns_names_map, soc_economy_pred_name_map
 
 
 class SocioEconomicParams(BaseModel):
-    pred: int
-    lower: int
-    upper: float
-    is_interval: bool
+    pred: int = Field(..., description="Prediction column name")
+    lower: int = Field(..., description="Lower prediction column name")
+    upper: float = Field(..., description="Upper prediction column name")
+    is_interval: bool = Field(..., description="Is interval prediction column name")
 
     @field_validator("upper", mode="after")
     @classmethod
@@ -30,7 +30,7 @@ class SocioEconomicParams(BaseModel):
 class SocioEconomicSchema(BaseModel):
     socio_economic_prediction: dict[str, SocioEconomicParams]
 
-    @field_validator("socio_economic_prediction", mode="before")
+    @field_validator("socio_economic_prediction", mode="after")
     @classmethod
     def rename_attributes(cls, value: dict[str, SocioEconomicParams]):
 
@@ -54,7 +54,9 @@ class SocioEconomicSchema(BaseModel):
             raise http_exception(
                 500,
                 "Error during output validation",
-            )
+                _input=list(value.keys()),
+                _detail={"error": repr(e)},
+            ) from e
 
 
 class SocioEconomicResponseSchema(SocioEconomicSchema):
@@ -70,12 +72,3 @@ class SocioEconomicResponseSchema(SocioEconomicSchema):
 
     split_prediction: Optional[dict[int, SocioEconomicSchema]]
     params_data: DevelopmentDTO | ContextDevelopmentDTO
-
-    def __post_init__(self):
-        for k, v in self.split_prediction.items():
-            for k1, v1 in v.items():
-                for k2 in v1.__dict__.keys():
-                    setattr(
-                        v1,
-                        k2,
-                    )
