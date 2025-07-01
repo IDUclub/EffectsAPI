@@ -80,7 +80,6 @@ async def get_context_functional_zones(
 ) -> gpd.GeoDataFrame:
     sources_df = await urban_api_gateway.get_functional_zones_sources(project_id)
     year, source = await _get_best_functional_zones_source(sources_df, source, year)
-    # year, source = await urban_api_gateway.get_optimal_func_zone_request_data(token, scenario_id, year, source)
     functional_zones = await urban_api_gateway.get_functional_zones(
         project_id, year, source
     )
