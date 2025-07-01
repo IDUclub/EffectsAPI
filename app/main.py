@@ -1,55 +1,36 @@
 from contextlib import asynccontextmanager
 
-from app.api.routers.effects import effects_controller
-from app.api.routers.effects.task_schema import TaskSchema
-from app.api.utils.const import API_DESCRIPTION, API_TITLE
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 
-controllers = [effects_controller]
+from app.effects_api.effects_controller import development_router
+from app.system_router.system_controller import system_router
 
-async def on_startup():
-    for c in controllers:
-        c.on_startup()
-
-async def on_shutdown():
-    ...
-
-@asynccontextmanager
-async def lifespan(router : FastAPI):
-    await on_startup()
-    yield
-    await on_shutdown()
-
+# TODO add app version
 app = FastAPI(
-    title=API_TITLE,
-    description=API_DESCRIPTION,
-    lifespan=lifespan
+    title="Effects API",
+    description="API for calculating effects of territory transformation with BlocksNet library",
 )
+
+origins = ["*"]
 
 # disable cors
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex='http://.*',
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=100)
 
+
 @app.get("/", include_in_schema=False)
 async def read_root():
-    return RedirectResponse('/docs')
+    return RedirectResponse("/docs")
 
-@app.get('/tasks', tags=['Tasks'])
-def get_tasks() -> dict[int, TaskSchema]:
-    return effects_controller.tasks
 
-@app.get('/task_status', tags=['Tasks'])
-def get_task_status(task_id : int) -> TaskSchema:
-    return effects_controller.tasks[task_id]
-
-for controller in controllers:
-    app.include_router(controller.router)
+app.include_router(system_router)
+app.include_router(development_router)
