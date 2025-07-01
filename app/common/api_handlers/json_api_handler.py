@@ -20,11 +20,6 @@ class JSONAPIHandler:
         self.__name__ = "UrbanAPIGateway"
         self.base_url = base_url
 
-    def model_dump(
-        self,
-    ):
-        return {k: str(v) for k, v in self.__dict__.items()}
-
     @staticmethod
     async def _check_response_status(
         response: aiohttp.ClientResponse,

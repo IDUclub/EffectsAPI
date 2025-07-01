@@ -45,11 +45,6 @@ class EffectsService:
         self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
 
-    def model_dump(
-        self,
-    ):
-        return {k: str(v) for k, v in self.__dict__.items()}
-
     @staticmethod
     async def get_optimal_func_zone_data(
         params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO,

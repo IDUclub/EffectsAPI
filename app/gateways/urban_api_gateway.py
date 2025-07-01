@@ -16,11 +16,6 @@ class UrbanAPIGateway:
         self.json_handler = JSONAPIHandler(base_url)
         self.__name__ = "UrbanAPIGateway"
 
-    def model_dump(
-        self,
-    ):
-        return {k: str(v) for k, v in self.__dict__.items()}
-
     # TODO context
     async def get_physical_objects(
         self, project_id: int, **kwargs: dict
