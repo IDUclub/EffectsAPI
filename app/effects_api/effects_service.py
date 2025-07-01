@@ -4,33 +4,50 @@ from blocksnet.analysis.indicators import calculate_development_indicators
 from blocksnet.blocks.aggregation import aggregate_objects
 from blocksnet.blocks.assignment import assign_land_use
 from blocksnet.enums import LandUse
-from blocksnet.machine_learning.regression import (DensityRegressor,
-                                                   SocialRegressor)
+from blocksnet.machine_learning.regression import DensityRegressor, SocialRegressor
 from blocksnet.relations import generate_adjacency_graph
 from loguru import logger
 
 from app.dependencies import urban_api_gateway
 from app.effects_api.modules.scenario_service import (
-    get_scenario_blocks, get_scenario_buildings, get_scenario_functional_zones,
-    get_scenario_services)
+    get_scenario_blocks,
+    get_scenario_buildings,
+    get_scenario_functional_zones,
+    get_scenario_services,
+)
 from app.effects_api.modules.service_type_service import adapt_service_types
 
 from .constants.const import LAND_USE_RULES
-from .dto.development_dto import ContextDevelopmentDTO, DevelopmentDTO
-from .modules.context_service import (get_context_blocks,
-                                      get_context_buildings,
-                                      get_context_functional_zones,
-                                      get_context_services)
+from .dto.development_dto import (
+    ContextDevelopmentDTO,
+    DevelopmentDTO,
+    SocioEconomicPredictionDTO,
+)
+from .modules.context_service import (
+    get_context_blocks,
+    get_context_buildings,
+    get_context_functional_zones,
+    get_context_services,
+)
 from .schemas.development_response_schema import DevelopmentResponseSchema
-from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
+from .schemas.socio_economic_response_schema import (
+    SocioEconomicResponseSchema,
+    SocioEconomicSchema,
+)
 
 
 # TODO add caching service
 class EffectsService:
 
+    def __init__(
+        self,
+    ):
+        self.bn_social_regressor: SocialRegressor = SocialRegressor()
+
     @staticmethod
     async def get_optimal_func_zone_data(
-        params: DevelopmentDTO | ContextDevelopmentDTO, token: str
+        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO,
+        token: str,
     ) -> DevelopmentDTO:
         """
         Get optimal functional zone source and year for the project scenario.
@@ -375,9 +392,40 @@ class EffectsService:
 
         return development_df
 
+    async def run_social_reg_prediction(
+        self,
+        blocks: gpd.GeoDataFrame,
+        data_input: pd.DataFrame,
+    ):
+        """
+        Function runs social regression from blocksnet
+        Args:
+            blocks (gpd.GeoDataFrame): Block layer already containing per-land-use **shares**
+            data_input (pd.DataFrame): Data to run regression on
+        Returns:
+            SocioEconomicSchema: SocioEconomicSchema from schemas to return result generation
+        """
+
+        data_input["latitude"] = blocks.geometry.union_all().centroid.x
+        data_input["longitude"] = blocks.geometry.union_all().centroid.y
+        data_input["buildings_count"] = data_input["count_buildings"]
+        y_pred, pi_lower, pi_upper = self.bn_social_regressor.evaluate(data_input)
+        iloc = 0
+        result_data = {
+            "pred": y_pred.apply(round).astype(int).iloc[iloc].to_dict(),
+            "lower": pi_lower.iloc[iloc].to_dict(),
+            "upper": pi_upper.iloc[iloc].to_dict(),
+        }
+        result_df = pd.DataFrame.from_dict(result_data)
+        result_df["is_interval"] = (result_df["pred"] <= result_df["upper"]) & (
+            result_df["pred"] >= result_df["lower"]
+        )
+        res = result_df.to_dict(orient="index")
+        return SocioEconomicSchema(**{"socio_economic_prediction": res})
+
     async def evaluate_master_plan(
-        self, params: ContextDevelopmentDTO, token: str = None
-    ) -> SocioEconomicResponseSchema:
+        self, params: SocioEconomicPredictionDTO, token: str = None
+    ) -> SocioEconomicSchema:
         """
         End-to-end pipeline that fuses *project* and *context* blocks, enriches
         them with development parameters and produces socio-economic forecasts
@@ -409,6 +457,8 @@ class EffectsService:
 
         logger.info("Evaluating master plan effects")
         params = await self.get_optimal_func_zone_data(params, token)
+        project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
+        project_info = await urban_api_gateway.get_all_project_info(project_id, token)
         context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
             params.scenario_id,
             params.context_func_zone_source,
@@ -454,27 +504,38 @@ class EffectsService:
         blocks[cols] = development_df[cols].values
         for lu in LandUse:
             blocks[lu.value] = blocks[lu.value] * blocks["site_area"]
-        data = [blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
-        input = pd.DataFrame(data)
+        main_data = [blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
+        main_input = pd.DataFrame(main_data)
+        main_res = await self.run_social_reg_prediction(blocks, main_input)
+        context_results = {}
+        if params.split:
+            for context_ter_id in project_info["properties"]["context"]:
+                territory = gpd.GeoDataFrame(
+                    geometry=[
+                        await urban_api_gateway.get_territory_geometry(context_ter_id)
+                    ],
+                    crs=4326,
+                )
+                ter_blocks = (
+                    blocks.sjoin(
+                        territory.to_crs(territory.estimate_utm_crs()), how="left"
+                    )
+                    .dropna(subset="index_right")
+                    .drop(columns="index_right")
+                )
+                ter_data = [
+                    ter_blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()
+                ]
+                ter_input = pd.DataFrame(ter_data)
+                context_results[context_ter_id] = await self.run_social_reg_prediction(
+                    ter_blocks, ter_input
+                )
 
-        input["latitude"] = blocks.geometry.union_all().centroid.x
-        input["longitude"] = blocks.geometry.union_all().centroid.y
-        input["buildings_count"] = input["count_buildings"]
-        sr = SocialRegressor()
-        y_pred, pi_lower, pi_upper = sr.evaluate(input)
-        iloc = 0
-        result_data = {
-            "pred": y_pred.apply(round).astype(int).iloc[iloc].to_dict(),
-            "lower": pi_lower.iloc[iloc].to_dict(),
-            "upper": pi_upper.iloc[iloc].to_dict(),
-        }
-        result_df = pd.DataFrame.from_dict(result_data)
-        result_df["is_interval"] = (result_df["pred"] <= result_df["upper"]) & (
-            result_df["pred"] >= result_df["lower"]
+        return SocioEconomicResponseSchema(
+            socio_economic_prediction=main_res.socio_economic_prediction,
+            split_prediction=context_results if context_results else None,
+            params_data=params,
         )
-        res = result_df.to_dict(orient="index")
-        res = {"socio_economic_prediction": res, "params_data": params.as_dict()}
-        return SocioEconomicResponseSchema(**res)
 
     async def calc_project_development(
         self, token: str, params: DevelopmentDTO

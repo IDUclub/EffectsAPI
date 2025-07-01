@@ -9,3 +9,5 @@ repos:
     rev: 6.0.1
     hooks:
       - id: isort
+        name: isort (python)
+        args: ["--profile", "black"]

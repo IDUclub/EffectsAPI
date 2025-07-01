@@ -4,10 +4,15 @@ from fastapi import APIRouter
 from fastapi.params import Depends
 
 from app.common.auth.auth import verify_token
-from app.common.exceptions.controller_exception_handler import \
-    handle_controller_exception
+from app.common.exceptions.controller_exception_handler import (
+    handle_controller_exception,
+)
 
-from .dto.development_dto import ContextDevelopmentDTO, DevelopmentDTO
+from .dto.development_dto import (
+    ContextDevelopmentDTO,
+    DevelopmentDTO,
+    SocioEconomicPredictionDTO,
+)
 from .effects_service import effects_service
 from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
@@ -45,7 +50,7 @@ async def get_context_development(
     "/socio_economic_prediction", response_model=SocioEconomicResponseSchema
 )
 async def get_socio_economic_prediction(
-    params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
+    params: Annotated[SocioEconomicPredictionDTO, Depends(SocioEconomicPredictionDTO)],
     token: str = Depends(verify_token),
 ) -> SocioEconomicResponseSchema:
 
