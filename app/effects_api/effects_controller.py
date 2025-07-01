@@ -5,7 +5,6 @@ from fastapi.params import Depends
 
 from app.common.auth.auth import verify_token
 
-from ..common.exceptions.exception_handler import async_ultimate_exception_decorator
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
@@ -21,7 +20,6 @@ development_router = APIRouter(prefix="/development", tags=["Effects"])
 @development_router.get(
     "/project_development", response_model=DevelopmentResponseSchema
 )
-@async_ultimate_exception_decorator
 async def get_project_development(
     params: Annotated[DevelopmentDTO, Depends(DevelopmentDTO)],
     token: str = Depends(verify_token),
@@ -32,7 +30,6 @@ async def get_project_development(
 @development_router.get(
     "/context_development", response_model=DevelopmentResponseSchema
 )
-@async_ultimate_exception_decorator
 async def get_context_development(
     params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
     token: str = Depends(verify_token),
@@ -43,7 +40,6 @@ async def get_context_development(
 @development_router.get(
     "/socio_economic_prediction", response_model=SocioEconomicResponseSchema
 )
-@async_ultimate_exception_decorator
 async def get_socio_economic_prediction(
     params: Annotated[SocioEconomicPredictionDTO, Depends(SocioEconomicPredictionDTO)],
     token: str = Depends(verify_token),
