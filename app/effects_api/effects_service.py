@@ -1,11 +1,18 @@
 import geopandas as gpd
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
+from blocksnet.analysis.provision import competitive_provision, provision_strong_total
 from blocksnet.blocks.aggregation import aggregate_objects
 from blocksnet.blocks.assignment import assign_land_use
+from blocksnet.config import service_types_config
 from blocksnet.enums import LandUse
 from blocksnet.machine_learning.regression import DensityRegressor, SocialRegressor
-from blocksnet.relations import generate_adjacency_graph
+from blocksnet.relations import (
+    calculate_accessibility_matrix,
+    generate_adjacency_graph,
+    get_accessibility_context,
+    get_accessibility_graph,
+)
 from loguru import logger
 
 from app.dependencies import urban_api_gateway
@@ -594,6 +601,78 @@ class EffectsService:
         res = res.to_dict(orient="list")
         res.update({"params_data": params.model_dump()})
         return DevelopmentResponseSchema(**res)
+
+    def _get_accessibility_context(
+        self, blocks: pd.DataFrame, acc_mx: pd.DataFrame, accessibility: float
+    ) -> list[int]:
+        blocks["population"] = blocks["population"].fillna(0)
+        project_blocks = blocks[blocks["is_project"]].copy()
+        context_blocks = get_accessibility_context(
+            acc_mx, project_blocks, accessibility, out=False, keep=True
+        )
+        return list(context_blocks.index)
+
+    def _assess_provision(
+        self, blocks: pd.DataFrame, acc_mx: pd.DataFrame, service_type: str
+    ) -> gpd.GeoDataFrame:
+        _, demand, accessibility = service_types_config[service_type].values()
+        context_ids = self._get_accessibility_context(blocks, acc_mx, accessibility)
+        capacity_column = f"capacity_{service_type}"
+        if capacity_column not in blocks.columns:
+            blocks_df = blocks[["geometry", "population"]].fillna(0)
+            blocks_df["capacity"] = 0
+        else:
+            blocks_df = blocks.rename(columns={capacity_column: "capacity"})[
+                ["geometry", "population", "capacity"]
+            ].fillna(0)
+        prov_df, _ = competitive_provision(blocks_df, acc_mx, accessibility, demand)
+        prov_df = prov_df.loc[context_ids].copy()
+        return blocks[["geometry"]].join(prov_df, how="right")
+
+    async def territory_transformation_scenario(
+        self, token: str, params: ContextDevelopmentDTO
+    ):
+        service_types = await urban_api_gateway.get_service_types()
+        service_types = await adapt_service_types(service_types)
+        service_types = service_types[
+            ~service_types["infrastructure_type"].isna()
+        ].copy()
+
+        params = await self.get_optimal_func_zone_data(params, token)
+        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
+        )
+        scenario_blocks, scenario_buildings = (
+            await self.aggregate_blocks_layer_scenario(
+                params.scenario_id,
+                params.proj_func_zone_source,
+                params.proj_func_source_year,
+                token,
+            )
+        )
+        blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
+        graph = get_accessibility_graph(scenario_blocks, "intermodal")
+        acc_mx = calculate_accessibility_matrix(scenario_blocks, graph)
+        prov_gdfs = {}
+        for st_id in service_types.index:
+            st_name = service_types.loc[st_id, "name"]
+            column = f"capacity_{st_name}"
+            _, demand, accessibility = service_types_config[st_name].values()
+            prov_gdf = self._assess_provision(blocks, acc_mx, st_name)
+            prov_gdfs[st_name] = prov_gdf
+
+        prov_totals = {}
+        for st_name, prov_gdf in prov_gdfs.items():
+            if prov_gdf.demand.sum() == 0:
+                total = None
+            else:
+                total = float(provision_strong_total(prov_gdf))
+            prov_totals[st_name] = total
+
+        return prov_totals
 
 
 effects_service = EffectsService()

@@ -45,3 +45,11 @@ async def get_socio_economic_prediction(
     token: str = Depends(verify_token),
 ) -> SocioEconomicResponseSchema:
     return await effects_service.evaluate_master_plan(params, token)
+
+
+@development_router.get("/F_35")
+async def territory_transformation(
+    params: Annotated[SocioEconomicPredictionDTO, Depends(SocioEconomicPredictionDTO)],
+    token: str = Depends(verify_token),
+):
+    return await effects_service.territory_transformation_scenario(token, params)
