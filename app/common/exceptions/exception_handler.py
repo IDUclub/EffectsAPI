@@ -15,19 +15,29 @@ from .http_exception_wrapper import http_exception
 class ExceptionHandlerMiddleware(
     BaseHTTPMiddleware
 ):  # pylint: disable=too-few-public-methods
-    """Handle exceptions, so they become http response code 500 - Internal Server Error.
-
-    If debug is activated in app configuration, then stack trace is returned, otherwise only a generic error message.
-    Message is sent to logger error stream anyway.
+    """Handle exceptions, so they become http response code 500 - Internal Server Error if not handled as HTTPException
+    previously.
+    Attributes:
+           app (FastAPI): The FastAPI application instance.
     """
 
     def __init__(self, app: FastAPI):
-        """Passing debug as a list with single element is a hack to be able to change the value
-        on the application startup.
         """
+        Universal exception handler middleware init function.
+        Args:
+            app (FastAPI): The FastAPI application instance.
+        """
+
         super().__init__(app)
 
     async def dispatch(self, request: Request, call_next):
+        """
+        Dispatch function for sending errors to user from API
+        Args:
+            request (Request): The incoming request object.
+            call_next: function to extract.
+        """
+
         try:
             return await call_next(request)
         except Exception as e:
