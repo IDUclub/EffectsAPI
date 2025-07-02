@@ -456,7 +456,7 @@ class EffectsService:
         4. Feed summarised indicators into SocialRegressor.
         """
 
-        logger.info("Evaluating master plan effects")
+        logger.info(f"Evaluating master plan effects with {params.model_dump()}")
         params = await self.get_optimal_func_zone_data(params, token)
         project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
         project_info = await urban_api_gateway.get_all_project_info(project_id, token)
@@ -532,6 +532,9 @@ class EffectsService:
                     ter_blocks, ter_input
                 )
 
+        logger.info(
+            f"Finished evaluating master plan effects with {params.model_dump()}"
+        )
         return SocioEconomicResponseSchema(
             socio_economic_prediction=main_res.socio_economic_prediction,
             split_prediction=context_results if context_results else None,
@@ -550,6 +553,7 @@ class EffectsService:
             DevelopmentResponseSchema: Response schema with development indicators
         """
 
+        logger.info(f"Calculating development for project {params.model_dump()}")
         params = await self.get_optimal_func_zone_data(params, token)
         blocks, buildings = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,
@@ -560,6 +564,9 @@ class EffectsService:
         res = await self.run_development_parameters(blocks)
         res = res.to_dict(orient="list")
         res.update({"params_data": params.model_dump()})
+        logger.info(
+            f"Finished calculating development for project {params.model_dump()}"
+        )
         return DevelopmentResponseSchema(**res)
 
     async def calc_context_development(
@@ -574,6 +581,7 @@ class EffectsService:
             DevelopmentResponseSchema: Response schema with development indicators
         """
 
+        logger.info(f"Calculating development for context {params.model_dump()}")
         params = await self.get_optimal_func_zone_data(params, token)
         context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
             params.scenario_id,
@@ -593,6 +601,9 @@ class EffectsService:
         res = await self.run_development_parameters(blocks)
         res = res.to_dict(orient="list")
         res.update({"params_data": params.model_dump()})
+        logger.info(
+            f"Finished calculating development for context {params.model_dump()}"
+        )
         return DevelopmentResponseSchema(**res)
 
 
