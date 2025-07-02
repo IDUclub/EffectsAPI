@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 
+from app.common.exceptions.exception_handler import ExceptionHandlerMiddleware
 from app.effects_api.effects_controller import development_router
 from app.system_router.system_controller import system_router
 
@@ -25,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=100)
+app.add_middleware(ExceptionHandlerMiddleware)
 
 
 @app.get("/", include_in_schema=False)

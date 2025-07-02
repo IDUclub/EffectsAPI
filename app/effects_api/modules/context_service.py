@@ -4,13 +4,13 @@ from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
 from blocksnet.preprocessing.imputing import impute_buildings, impute_services
 
 from app.dependencies import urban_api_gateway
-from app.effects_api.constants.const import (LIVING_BUILDINGS_ID, ROADS_ID,
-                                             WATER_ID)
+from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
-from app.effects_api.modules.functional_sources_service import \
-    adapt_functional_zones
+from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.scenario_service import (
-    _get_best_functional_zones_source, close_gaps)
+    _get_best_functional_zones_source,
+    close_gaps,
+)
 from app.effects_api.modules.services_service import adapt_services
 
 
@@ -80,7 +80,6 @@ async def get_context_functional_zones(
 ) -> gpd.GeoDataFrame:
     sources_df = await urban_api_gateway.get_functional_zones_sources(project_id)
     year, source = await _get_best_functional_zones_source(sources_df, source, year)
-    # year, source = await urban_api_gateway.get_optimal_func_zone_request_data(token, scenario_id, year, source)
     functional_zones = await urban_api_gateway.get_functional_zones(
         project_id, year, source
     )

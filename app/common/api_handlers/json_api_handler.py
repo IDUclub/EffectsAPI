@@ -17,6 +17,7 @@ class JSONAPIHandler:
             None
         """
 
+        self.__name__ = "UrbanAPIGateway"
         self.base_url = base_url
 
     @staticmethod

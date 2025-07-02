@@ -23,9 +23,6 @@ class DevelopmentDTO(BaseModel):
         description="Year of the chosen project functional-zone source.",
     )
 
-    def as_dict(self):
-        return self.model_dump(by_alias=False)
-
 
 class ContextDevelopmentDTO(DevelopmentDTO):
     context_func_zone_source: Optional[Literal["PZZ", "OSM", "User"]] = Field(
@@ -40,4 +37,13 @@ class ContextDevelopmentDTO(DevelopmentDTO):
         None,
         examples=[2023, 2024],
         description="Year of the chosen context functional-zone source.",
+    )
+
+
+class SocioEconomicPredictionDTO(ContextDevelopmentDTO):
+
+    split: bool = Field(
+        default=False,
+        examples=[False, True],
+        description="If split will return additional evaluation for each context mo",
     )
