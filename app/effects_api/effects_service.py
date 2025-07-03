@@ -227,7 +227,7 @@ class EffectsService:
 
         logger.info("Starting generating context blocks layer")
         project_id = await urban_api_gateway.get_project_id(scenario_id, token)
-        context_blocks_gdf = await get_context_blocks(project_id)
+        context_blocks_gdf = await get_context_blocks(project_id, token)
         context_blocks_crs = context_blocks_gdf.crs
         context_blocks_gdf = context_blocks_gdf.to_crs(context_blocks_crs)
         context_blocks_gdf["site_area"] = context_blocks_gdf.area
@@ -247,7 +247,7 @@ class EffectsService:
         )
         logger.success(f"Land use for context blocks have been assigned {scenario_id}")
 
-        context_buildings_gdf = await get_context_buildings(project_id)
+        context_buildings_gdf = await get_context_buildings(project_id, token)
 
         if context_buildings_gdf is not None:
             context_buildings_gdf = context_buildings_gdf.to_crs(context_blocks_gdf.crs)
@@ -273,7 +273,9 @@ class EffectsService:
 
         service_types = await urban_api_gateway.get_service_types()
         service_types = await adapt_service_types(service_types)
-        context_services_dict = await get_context_services(project_id, service_types)
+        context_services_dict = await get_context_services(
+            project_id, service_types, token
+        )
 
         for service_type, services in context_services_dict.items():
             services = services.to_crs(context_blocks_gdf.crs)

@@ -18,51 +18,65 @@ class UrbanAPIGateway:
 
     # TODO context
     async def get_physical_objects(
-        self, project_id: int, **kwargs: dict
+        self, project_id: int, token: str, **kwargs: dict
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/physical_objects_with_geometry",
             params=kwargs,
+            headers={"Authorization": f"Bearer {token}"},
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
             "physical_object_id"
         )
 
-    async def get_services(self, project_id: int, **kwargs: Any) -> gpd.GeoDataFrame:
+    async def get_services(
+        self, project_id: int, token: str, **kwargs: Any
+    ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/services_with_geometry",
             params=kwargs,
+            headers={"Authorization": f"Bearer {token}"},
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
             "service_id"
         )
 
-    async def get_functional_zones_sources(self, project_id: int) -> pd.DataFrame:
+    async def get_functional_zones_sources(
+        self, project_id: int, token: str
+    ) -> pd.DataFrame:
         res = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/context/functional_zone_sources"
+            f"/api/v1/projects/{project_id}/context/functional_zone_sources",
+            headers={"Authorization": f"Bearer {token}"},
         )
         return pd.DataFrame(res)
 
     async def get_functional_zones(
-        self, project_id: int, year: int, source: int
+        self, token: str, project_id: int, year: int, source: int
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/context/functional_zones",
             params={"year": year, "source": source},
+            headers={"Authorization": f"Bearer {token}"},
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
             "functional_zone_id"
         )
 
-    async def get_project(self, project_id: int) -> Dict[str, Any]:
-        res = await self.json_handler.get(f"/api/v1/projects/{project_id}")
+    async def get_project(self, project_id: int, token: str) -> Dict[str, Any]:
+        res = await self.json_handler.get(
+            f"/api/v1/projects/{project_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         return res
 
-    async def get_project_geometry(self, project_id: int):
-        res = await self.json_handler.get(f"/api/v1/projects/{project_id}/territory")
+    async def get_project_geometry(self, project_id: int, token: str):
+        res = await self.json_handler.get(
+            f"/api/v1/projects/{project_id}/territory",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         geometry_json = json.dumps(res["geometry"])
         return shapely.from_geojson(geometry_json)
 
