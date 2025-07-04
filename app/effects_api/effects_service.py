@@ -171,7 +171,8 @@ class EffectsService:
         scenario_services_dict = await get_scenario_services(
             scenario_id, service_types, token
         )
-
+        if not scenario_services_dict:
+            scenario_services_dict = {}
         for service_type, services in scenario_services_dict.items():
             services = services.to_crs(scenario_blocks_gdf.crs)
             scenario_blocks_services, _ = aggregate_objects(
@@ -191,7 +192,6 @@ class EffectsService:
                     }
                 )
             )
-
         scenario_blocks_gdf["is_project"] = True
         logger.success(
             f"Services for scenario blocks have been aggregated {scenario_id}"
@@ -276,7 +276,8 @@ class EffectsService:
         context_services_dict = await get_context_services(
             project_id, service_types, token
         )
-
+        if not context_services_dict:
+            context_services_dict = {}
         for service_type, services in context_services_dict.items():
             services = services.to_crs(context_blocks_gdf.crs)
             context_blocks_services, _ = aggregate_objects(context_blocks_gdf, services)
@@ -520,9 +521,7 @@ class EffectsService:
                     crs=4326,
                 )
                 ter_blocks = (
-                    blocks.sjoin(
-                        territory.to_crs(territory.estimate_utm_crs()), how="left"
-                    )
+                    blocks.sjoin(territory.to_crs(blocks.crs), how="left")
                     .dropna(subset="index_right")
                     .drop(columns="index_right")
                 )
