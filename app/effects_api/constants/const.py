@@ -110,6 +110,9 @@ BUILDINGS_RULES = {
     "population": [["properties", "population_balanced"]],
 }
 
+
+INFRASTRUCTURES_WEIGHTS = {"basic": 0.5714, "additional": 0.2857, "comfort": 0.1429}
+
 LIVING_BUILDINGS_ID = 4
 ROADS_ID = 26
 WATER_ID = 4

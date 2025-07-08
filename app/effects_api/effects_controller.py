@@ -1,7 +1,9 @@
+import json
 from typing import Annotated
 
 from fastapi import APIRouter
 from fastapi.params import Depends
+from starlette.responses import JSONResponse
 
 from app.common.auth.auth import verify_token
 
@@ -10,6 +12,7 @@ from .dto.development_dto import (
     DevelopmentDTO,
     SocioEconomicPredictionDTO,
 )
+from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .effects_service import effects_service
 from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
@@ -47,9 +50,21 @@ async def get_socio_economic_prediction(
     return await effects_service.evaluate_master_plan(params, token)
 
 
+# @development_router.get("/F_35")
+# async def territory_transformation(
+#     params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
+#     token: str = Depends(verify_token),
+# ):
+#     return await effects_service.territory_transformation_scenario(token, params)
+
+
 @development_router.get("/F_35")
 async def territory_transformation(
-    params: Annotated[SocioEconomicPredictionDTO, Depends(SocioEconomicPredictionDTO)],
+    params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
     token: str = Depends(verify_token),
 ):
-    return await effects_service.territory_transformation_scenario(token, params)
+    gdf = await effects_service.territory_transformation_scenario(token, params)
+    gdf = gdf.to_crs(4326)
+
+    geojson_dict = json.loads(gdf.to_json(drop_id=True))
+    return JSONResponse(content=geojson_dict)

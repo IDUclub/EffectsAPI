@@ -7,13 +7,17 @@ from fastapi.responses import RedirectResponse
 
 from app.common.exceptions.exception_handler import ExceptionHandlerMiddleware
 from app.effects_api.effects_controller import development_router
+from app.effects_api.modules.task_service import init_worker, lifespan
+from app.effects_api.tasks_controller import router as tasks_router
 from app.system_router.system_controller import system_router
 
 # TODO add app version
 app = FastAPI(
     title="Effects API",
     description="API for calculating effects of territory transformation with BlocksNet library",
+    lifespan=lifespan,
 )
+init_worker(app)
 
 origins = ["*"]
 
@@ -34,5 +38,6 @@ async def read_root():
     return RedirectResponse("/docs")
 
 
+app.include_router(tasks_router)
 app.include_router(system_router)
 app.include_router(development_router)

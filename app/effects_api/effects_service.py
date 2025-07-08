@@ -1,3 +1,5 @@
+import json
+
 import geopandas as gpd
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
@@ -7,6 +9,16 @@ from blocksnet.blocks.assignment import assign_land_use
 from blocksnet.config import service_types_config
 from blocksnet.enums import LandUse
 from blocksnet.machine_learning.regression import DensityRegressor, SocialRegressor
+from blocksnet.optimization.services import (
+    AreaSolution,
+    BlockSolution,
+    Facade,
+    GradientChooser,
+    SimpleChooser,
+    TPEOptimizer,
+    WeightedConstraints,
+    WeightedObjective,
+)
 from blocksnet.relations import (
     calculate_accessibility_matrix,
     generate_adjacency_graph,
@@ -24,12 +36,14 @@ from app.effects_api.modules.scenario_service import (
 )
 from app.effects_api.modules.service_type_service import adapt_service_types
 
-from .constants.const import LAND_USE_RULES
+from ..common.caching.caching_service import cache
+from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
     SocioEconomicPredictionDTO,
 )
+from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .modules.context_service import (
     get_context_blocks,
     get_context_buildings,
@@ -602,7 +616,7 @@ class EffectsService:
         res.update({"params_data": params.model_dump()})
         return DevelopmentResponseSchema(**res)
 
-    def _get_accessibility_context(
+    async def _get_accessibility_context(
         self, blocks: pd.DataFrame, acc_mx: pd.DataFrame, accessibility: float
     ) -> list[int]:
         blocks["population"] = blocks["population"].fillna(0)
@@ -612,11 +626,14 @@ class EffectsService:
         )
         return list(context_blocks.index)
 
-    def _assess_provision(
+    async def _assess_provision(
         self, blocks: pd.DataFrame, acc_mx: pd.DataFrame, service_type: str
     ) -> gpd.GeoDataFrame:
         _, demand, accessibility = service_types_config[service_type].values()
-        context_ids = self._get_accessibility_context(blocks, acc_mx, accessibility)
+        blocks["is_project"] = blocks["is_project"].fillna(False).astype(bool)
+        context_ids = await self._get_accessibility_context(
+            blocks, acc_mx, accessibility
+        )
         capacity_column = f"capacity_{service_type}"
         if capacity_column not in blocks.columns:
             blocks_df = blocks[["geometry", "population"]].fillna(0)
@@ -630,7 +647,7 @@ class EffectsService:
         return blocks[["geometry"]].join(prov_df, how="right")
 
     async def territory_transformation_scenario(
-        self, token: str, params: ContextDevelopmentDTO
+        self, token: str, params: TerritoryTransformationDTO
     ):
         service_types = await urban_api_gateway.get_service_types()
         service_types = await adapt_service_types(service_types)
@@ -654,14 +671,13 @@ class EffectsService:
             )
         )
         blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
-        graph = get_accessibility_graph(scenario_blocks, "intermodal")
-        acc_mx = calculate_accessibility_matrix(scenario_blocks, graph)
+        graph = get_accessibility_graph(blocks, "intermodal")
+        acc_mx = calculate_accessibility_matrix(blocks, graph)
         prov_gdfs = {}
         for st_id in service_types.index:
             st_name = service_types.loc[st_id, "name"]
-            column = f"capacity_{st_name}"
             _, demand, accessibility = service_types_config[st_name].values()
-            prov_gdf = self._assess_provision(blocks, acc_mx, st_name)
+            prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
             prov_gdfs[st_name] = prov_gdf
 
         prov_totals = {}
@@ -672,7 +688,198 @@ class EffectsService:
                 total = float(provision_strong_total(prov_gdf))
             prov_totals[st_name] = total
 
-        return prov_totals
+        # provision after
+        service_types["infrastructure_weight"] = (
+            service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
+            * service_types["infrastructure_weight"]
+        )
+        blocks_lus = blocks.loc[blocks["is_project"], "land_use"]
+        blocks_lus = blocks_lus[~blocks_lus.isna()]
+        blocks_lus = blocks_lus.to_dict()
+
+        var_adapter = AreaSolution(blocks_lus)
+
+        facade = Facade(
+            blocks_lu=blocks_lus,
+            blocks_df=blocks,
+            accessibility_matrix=acc_mx,
+            var_adapter=var_adapter,
+        )
+
+        for st_id, row in service_types.iterrows():
+            st_name = row["name"]
+            st_weight = row["infrastructure_weight"]
+            st_column = f"capacity_{st_name}"
+            if st_column in blocks.columns:
+                df = blocks.rename(columns={st_column: "capacity"})[
+                    ["capacity"]
+                ].fillna(0)
+            else:
+                logger.info(
+                    f"#{st_id}:{st_name} нет на территории контекста проекта. Добавляем нулевой датафрейм"
+                )
+                df = blocks[[]].copy()
+                df["capacity"] = 0
+            facade.add_service_type(st_name, st_weight, df)
+
+        services_weights = service_types.set_index("name")[
+            "infrastructure_weight"
+        ].to_dict()
+
+        objective = WeightedObjective(
+            num_params=facade.num_params,
+            facade=facade,
+            weights=services_weights,
+            max_evals=50,
+        )
+
+        constraints = WeightedConstraints(num_params=facade.num_params, facade=facade)
+
+        tpe_optimizer = TPEOptimizer(
+            objective=objective,
+            constraints=constraints,
+            vars_chooser=SimpleChooser(facade),
+        )
+
+        best_x, best_val, perc, func_evals = tpe_optimizer.run(
+            max_runs=50, timeout=60000, initial_runs_num=1
+        )
+
+        prov_gdfs = {}
+        for st_id in service_types.index:
+            st_name = service_types.loc[st_id, "name"]
+            if st_name in facade._chosen_service_types:
+                prov_df = facade._provision_adapter.get_last_provision_df(st_name)
+                prov_gdf = blocks[["geometry"]].join(prov_df, how="right")
+                prov_gdfs[st_name] = prov_gdf
+
+        prov_totals = {}
+        for st_name, prov_gdf in prov_gdfs.items():
+            if prov_gdf.demand.sum() == 0:
+                total = None
+            else:
+                total = float(provision_strong_total(prov_gdf))
+            prov_totals[st_name] = total
+
+        response = prov_gdfs[params.required_service]
+        logger.info("123")
+        return response
+
+    # async def territory_transformation_scenario(
+    #     self, token: str, params: TerritoryTransformationDTO
+    # ):
+    #     method_name = "territory_transformation"
+    #     scen_id = params.scenario_id
+    #     required_srv = params.required_service
+    #
+    #     cached = cache.load(method_name, scen_id)
+    #     if cached:
+    #         prov_gdfs = {
+    #             name: gpd.GeoDataFrame.from_features(fcoll["features"])
+    #             for name, fcoll in cached["data"].items()
+    #         }
+    #         return prov_gdfs[required_srv]
+    #
+    #     service_types = await urban_api_gateway.get_service_types()
+    #     service_types = await adapt_service_types(service_types)
+    #     service_types = service_types[
+    #         ~service_types["infrastructure_type"].isna()
+    #     ].copy()
+    #
+    #     params = await self.get_optimal_func_zone_data(params, token)
+    #     context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
+    #         params.scenario_id,
+    #         params.context_func_zone_source,
+    #         params.context_func_source_year,
+    #         token,
+    #     )
+    #     scenario_blocks, scenario_buildings = (
+    #         await self.aggregate_blocks_layer_scenario(
+    #             params.scenario_id,
+    #             params.proj_func_zone_source,
+    #             params.proj_func_source_year,
+    #             token,
+    #         )
+    #     )
+    #     blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
+    #     graph = get_accessibility_graph(blocks, "intermodal")
+    #     acc_mx = calculate_accessibility_matrix(blocks, graph)
+    #     prov_gdfs = {}
+    #     for st_id in service_types.index:
+    #         st_name = service_types.loc[st_id, "name"]
+    #         _, demand, accessibility = service_types_config[st_name].values()
+    #         prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
+    #         prov_gdfs[st_name] = prov_gdf
+    #
+    #     prov_totals = {}
+    #     for st_name, prov_gdf in prov_gdfs.items():
+    #         if prov_gdf.demand.sum() == 0:
+    #             total = None
+    #         else:
+    #             total = float(provision_strong_total(prov_gdf))
+    #         prov_totals[st_name] = total
+    #
+    #     #provision after
+    #     service_types['infrastructure_weight'] = service_types['infrastructure_type'].map(INFRASTRUCTURES_WEIGHTS) * \
+    #                                              service_types['infrastructure_weight']
+    #     blocks_lus = blocks.loc[blocks['is_project'], 'land_use']
+    #     blocks_lus = blocks_lus[~blocks_lus.isna()]
+    #     blocks_lus = blocks_lus.to_dict()
+    #
+    #     var_adapter = AreaSolution(blocks_lus)
+    #
+    #     facade = Facade(
+    #         blocks_lu=blocks_lus,
+    #         blocks_df=blocks,
+    #         accessibility_matrix=acc_mx,
+    #         var_adapter=var_adapter,
+    #     )
+    #
+    #     for st_id, row in service_types.iterrows():
+    #         st_name = row['name']
+    #         st_weight = row['infrastructure_weight']
+    #         st_column = f'capacity_{st_name}'
+    #         if st_column in blocks.columns:
+    #             df = blocks.rename(columns={st_column: 'capacity'})[['capacity']].fillna(0)
+    #         else:
+    #             logger.info(f'#{st_id}:{st_name} нет на территории контекста проекта. Добавляем нулевой датафрейм')
+    #             df = blocks[[]].copy()
+    #             df['capacity'] = 0
+    #         facade.add_service_type(st_name, st_weight, df)
+    #
+    #         services_weights = service_types.set_index('name')['infrastructure_weight'].to_dict()
+    #
+    #         objective = WeightedObjective(num_params=facade.num_params, facade=facade, weights=services_weights, max_evals=50)
+    #         constraints = WeightedConstraints(num_params=facade.num_params, facade=facade)
+    #         tpe_optimizer = TPEOptimizer(objective=objective, constraints=constraints, vars_chooser=SimpleChooser(facade))
+    #
+    #         best_x, best_val, perc, func_evals = tpe_optimizer.run(max_runs=50, timeout=60000, initial_runs_num=1)
+    #
+    #         prov_gdfs = {}
+    #         for st_id in service_types.index:
+    #             st_name = service_types.loc[st_id, 'name']
+    #             if st_name in facade._chosen_service_types:
+    #                 prov_df = facade._provision_adapter.get_last_provision_df(st_name)
+    #                 prov_gdf = blocks[['geometry']].join(prov_df, how='right')
+    #                 prov_gdf = prov_gdf.to_crs(4326)
+    #                 prov_gdfs[st_name] = prov_gdf
+    #
+    #         # prov_totals = {}
+    #         # for st_name, prov_gdf in prov_gdfs.items():
+    #         #     if prov_gdf.demand.sum() == 0:
+    #         #         total = None
+    #         #     else:
+    #         #         total = float(provision_strong_total(prov_gdf))
+    #         #     prov_totals[st_name] = total
+    #
+    #         prov_json = {
+    #             name: json.loads(gdf.to_json(drop_id=True))
+    #             for name, gdf in prov_gdfs.items()
+    #         }
+    #         cache.save(method_name, scen_id, params.model_dump(), prov_json)
+    #
+    #     response = prov_gdfs[params.required_service]
+    #     return response
 
 
 effects_service = EffectsService()
