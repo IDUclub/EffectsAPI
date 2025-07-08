@@ -15,6 +15,7 @@ from app.effects_api.modules.task_service import (
 
 from ..common.caching.caching_service import cache
 from ..common.exceptions.http_exception_wrapper import http_exception
+from .dto.development_dto import ContextDevelopmentDTO
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -23,22 +24,19 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 @router.post("/{method}", status_code=202)
 async def create_task(
     method: str,
-    params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
-    token: str = Depends(verify_token),  # token получаем здесь
+    params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
+    token: str = Depends(verify_token),
 ):
     if method not in TASK_METHODS:
         raise http_exception(404, f"method '{method}' is not registered", method)
 
-    task_id = f"{method}__{params.scenario_id}"
+    task_id = f"{method}_{params.scenario_id}"
 
-    # ────────── не дублируем задачу ──────────
     existing = _task_map.get(task_id)
     if existing and existing.status in {"queued", "running"}:
-        # Уже в очереди или считается ➜ отдаём старый id/статус
         return {"task_id": task_id, "status": existing.status}
 
-    # ────────── создаём новую ──────────
-    task = AnyTask(method, params.scenario_id, token, params)  # ← token передаём!
+    task = AnyTask(method, params.scenario_id, token, params)
     _task_map[task_id] = task
     await _task_queue.put(task)
 

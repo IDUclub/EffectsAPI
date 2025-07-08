@@ -171,3 +171,4 @@ gdf_with_obj.geojson
 boundaries.parquet
 roads.parquet
 water.parquet
+__effects_cache__

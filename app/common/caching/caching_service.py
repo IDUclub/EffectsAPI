@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-_CACHE_DIR = Path("__effects_cache__")
-_CACHE_DIR.mkdir(exist_ok=True)
+_CACHE_DIR = Path().absolute() / "__effects_cache__"
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _FILENAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
@@ -15,8 +15,8 @@ def _safe(s: str) -> str:
 
 
 def _file_name(method: str, scenario_id: int, ts: datetime) -> Path:
-    stamp = ts.strftime("%Y%m%d_%H%M%S")
-    name = f"scenario_{scenario_id}__{_safe(method)}__{stamp}.json"
+    stamp = ts.strftime("%Y%m%d_%H%M")
+    name = f"scenario_{scenario_id}_{_safe(method)}_{stamp}.json"
     return _CACHE_DIR / name
 
 
@@ -32,6 +32,8 @@ class FileCache:
     ) -> Path:
         ts = datetime.now()
         path = _file_name(method, scenario_id, ts)
+        if path.exists():
+            return path
         to_save = {
             "meta": {"timestamp": ts.isoformat(), "params": params},
             "data": data,
@@ -40,7 +42,7 @@ class FileCache:
         return path
 
     def _latest_path(self, method: str, scenario_id: int) -> Path | None:
-        pattern = f"scenario_{scenario_id}__{_safe(method)}__*.json"
+        pattern = f"scenario_{scenario_id}_{_safe(method)}_*.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         return files[0] if files else None
 
