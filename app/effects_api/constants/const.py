@@ -113,6 +113,18 @@ BUILDINGS_RULES = {
 
 INFRASTRUCTURES_WEIGHTS = {"basic": 0.5714, "additional": 0.2857, "comfort": 0.1429}
 
+COL_RU = {
+    "demand": "Спрос",
+    "capacity": "Емкость сервисов",
+    "demand_left": "Неудовлетворенный спрос",
+    "demand_within": "Спрос в пределах нормативной доступности",
+    "demand_without": "Спрос за пределами нормативной доступности",
+    "capacity_left": "Оставшаяся емкость сервисов",
+    "capacity_within": "Емкость сервисов в пределах нормативной доступности",
+    "capacity_without": "Емкость сервисов за пределами нормативной доступности",
+    "provision_strong": "Обеспеченность сервисами",
+}
+
 LIVING_BUILDINGS_ID = 4
 ROADS_ID = 26
 WATER_ID = 4

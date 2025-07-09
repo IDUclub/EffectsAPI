@@ -37,6 +37,7 @@ from app.effects_api.modules.scenario_service import (
 from app.effects_api.modules.service_type_service import adapt_service_types
 
 from ..common.caching.caching_service import _to_dt, cache
+from ..common.utils.geodata import _gdf_to_ru_fc
 from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -770,23 +771,21 @@ class EffectsService:
     ):
         method_name = "territory_transformation"
 
-        # ───── получаем info, вытаскиваем updated_at и is_based ─────
         info = await urban_api_gateway.get_scenario_info(params.scenario_id, token)
-        updated_at = info["updated_at"]  # "2025-05-29T12:38:30Z"
+        updated_at = info["updated_at"]
         is_based = info["is_based"]
+        project_id = info["project"]["project_id"]
 
         phash = cache.params_hash(params.model_dump())
         cached = cache.load(method_name, params.scenario_id, phash)
-        if cached:
-            cache_ts = _to_dt(cached["meta"]["timestamp"])
-            scen_ts = _to_dt(updated_at)
+        if cached and cached["meta"]["scenario_updated_at"] == updated_at:
+            layer_set = cached["data"]
 
-            if cache_ts > scen_ts:
-                logger.info("cache hit — scenario older than cache")
-                return {
-                    n: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
-                    for n, fc in cached["data"].items()
-                }
+            target = layer_set["before"] if is_based else layer_set["after"]
+            return {
+                n: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
+                for n, fc in target.items()
+            }
 
         logger.info("Cache stale: scenario updated; recalculating")
 
@@ -821,6 +820,8 @@ class EffectsService:
             st_name = service_types.loc[st_id, "name"]
             _, demand, accessibility = service_types_config[st_name].values()
             prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
+            prov_gdf = prov_gdf.to_crs(4326)
+            prov_gdf = prov_gdf.drop(axis="columns", columns="provision_weak")
             prov_gdfs_before[st_name] = prov_gdf
 
         prov_totals = {}
@@ -831,7 +832,23 @@ class EffectsService:
                 total = float(provision_strong_total(prov_gdf))
             prov_totals[st_name] = total
 
-        # provision after
+        if is_based:
+            prov_json = {
+                "before": {
+                    name: _gdf_to_ru_fc(gdf) for name, gdf in prov_gdfs_before.items()
+                }
+            }
+            cache.save(
+                "territory_transformation",
+                params.scenario_id,
+                params.model_dump(),
+                prov_json,
+                scenario_updated_at=updated_at,
+            )
+
+            return prov_gdfs_before
+
+            # provision after
         service_types["infrastructure_weight"] = (
             service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
             * service_types["infrastructure_weight"]
@@ -903,13 +920,18 @@ class EffectsService:
                 total = float(provision_strong_total(prov_gdf))
             prov_totals[st_name] = total
 
+        # prov_json = {
+        #     n: json.loads(gdf.to_json(drop_id=True))
+        #     for n, gdf in prov_gdfs_after.items()
+        # }
+
         prov_json = {
-            n: json.loads(gdf.to_json(drop_id=True))
-            for n, gdf in prov_gdfs_after.items()
+            "before": {n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_before.items()},
+            "after": {n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_after.items()},
         }
 
         cache.save(
-            method_name,
+            "territory_transformation",
             params.scenario_id,
             params.model_dump(),
             prov_json,

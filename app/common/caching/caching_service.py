@@ -21,7 +21,6 @@ def _file_name(method: str, scenario_id: int, phash: str, day: str) -> Path:
 
 
 def _to_dt(dt_str: str) -> datetime:
-    # Urban API часто возвращает с 'Z' на конце → заменим на +00:00
     if dt_str.endswith("Z"):
         dt_str = dt_str[:-1] + "+00:00"
     return datetime.fromisoformat(dt_str)
@@ -50,7 +49,7 @@ class FileCache:
         day = datetime.now().strftime("%Y%m%d")
 
         path = _file_name(method, scenario_id, phash, day)
-        if path.exists():  # уже сохраняли сегодня
+        if path.exists():
             return path
 
         to_save = {
@@ -61,7 +60,7 @@ class FileCache:
             },
             "data": data,
         }
-        path.write_text(json.dumps(to_save, ensure_ascii=False))
+        path.write_text(json.dumps(to_save, ensure_ascii=False), encoding="utf-8")
         return path
 
     def _latest_path(self, method: str, scenario_id: int) -> Path | None:
@@ -73,7 +72,7 @@ class FileCache:
         self,
         method: str,
         scenario_id: int,
-        params_hash: str,  # ← требуем хэш
+        params_hash: str,
         max_age: timedelta | None = None,
     ) -> dict[str, Any] | None:
 
@@ -82,19 +81,19 @@ class FileCache:
         if not files:
             return None
 
-        path = files[0]  # самый свежий день
+        path = files[0]
         if max_age:
             mtime = datetime.fromtimestamp(path.stat().st_mtime)
             if datetime.now() - mtime > max_age:
                 return None
 
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def load_latest(self, method: str, scenario_id: int) -> dict[str, Any] | None:
         path = self._latest_path(method, scenario_id)
         if not path:
             return None
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def has(
         self, method: str, scenario_id: int, max_age: timedelta | None = None
