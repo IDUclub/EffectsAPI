@@ -30,7 +30,8 @@ class AnyTask:
         self.token = token
         self.params = params
 
-        self.task_id = f"{method}_{scenario_id}"
+        self.param_hash = cache.params_hash(params.model_dump())
+        self.task_id = f"{method}_{scenario_id}_{self.param_hash}"
         self.status: Literal["queued", "running", "done", "failed"] = "queued"
         self.result: dict | None = None
         self.error: str | None = None
@@ -43,15 +44,12 @@ class AnyTask:
         return {"status": "failed", "error": self.error}
 
     def run_sync(self) -> None:
-        """
-        Starts run from certain methods,
-        converts response to JSON-serializable type and puts into cache
-        """
         try:
             logger.info(f"[{self.task_id}] started")
             self.status = "running"
 
-            cached = cache.load(self.method, self.scenario_id)
+            # 1. Пытаемся взять кэш по (method, id, hash)
+            cached = cache.load(self.method, self.scenario_id, self.param_hash)
             if cached:
                 logger.info(f"[{self.task_id}] loaded from cache")
                 self.result = cached["data"]
@@ -66,7 +64,6 @@ class AnyTask:
 
             if isinstance(raw_data, gpd.GeoDataFrame):
                 data_to_cache = gdf_to_dict(raw_data)
-
             elif isinstance(raw_data, dict):
                 data_to_cache = {
                     k: gdf_to_dict(v) if isinstance(v, gpd.GeoDataFrame) else v
@@ -81,6 +78,7 @@ class AnyTask:
                 self.params.model_dump(),
                 data_to_cache,
             )
+
             self.result = data_to_cache
             self.status = "done"
 

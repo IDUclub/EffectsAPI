@@ -36,7 +36,7 @@ from app.effects_api.modules.scenario_service import (
 )
 from app.effects_api.modules.service_type_service import adapt_service_types
 
-from ..common.caching.caching_service import cache
+from ..common.caching.caching_service import _to_dt, cache
 from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -769,16 +769,26 @@ class EffectsService:
         self, token: str, params: ContextDevelopmentDTO
     ):
         method_name = "territory_transformation"
-        scen_id = params.scenario_id
-        # required_srv = params.required_service
 
-        cached = cache.load(method_name, scen_id)
+        # ───── получаем info, вытаскиваем updated_at и is_based ─────
+        info = await urban_api_gateway.get_scenario_info(params.scenario_id, token)
+        updated_at = info["updated_at"]  # "2025-05-29T12:38:30Z"
+        is_based = info["is_based"]
+
+        phash = cache.params_hash(params.model_dump())
+        cached = cache.load(method_name, params.scenario_id, phash)
         if cached:
-            prov_gdfs = {
-                name: gpd.GeoDataFrame.from_features(fcoll["features"])
-                for name, fcoll in cached["data"].items()
-            }
-            return prov_gdfs
+            cache_ts = _to_dt(cached["meta"]["timestamp"])
+            scen_ts = _to_dt(updated_at)
+
+            if cache_ts > scen_ts:
+                logger.info("cache hit — scenario older than cache")
+                return {
+                    n: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
+                    for n, fc in cached["data"].items()
+                }
+
+        logger.info("Cache stale: scenario updated; recalculating")
 
         service_types = await urban_api_gateway.get_service_types()
         service_types = await adapt_service_types(service_types)
@@ -804,15 +814,17 @@ class EffectsService:
         blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
         graph = get_accessibility_graph(blocks, "intermodal")
         acc_mx = calculate_accessibility_matrix(blocks, graph)
-        prov_gdfs = {}
+
+        # provision before
+        prov_gdfs_before = {}
         for st_id in service_types.index:
             st_name = service_types.loc[st_id, "name"]
             _, demand, accessibility = service_types_config[st_name].values()
             prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
-            prov_gdfs[st_name] = prov_gdf
+            prov_gdfs_before[st_name] = prov_gdf
 
         prov_totals = {}
-        for st_name, prov_gdf in prov_gdfs.items():
+        for st_name, prov_gdf in prov_gdfs_before.items():
             if prov_gdf.demand.sum() == 0:
                 total = None
             else:
@@ -874,17 +886,17 @@ class EffectsService:
             max_runs=50, timeout=60000, initial_runs_num=1
         )
 
-        prov_gdfs = {}
+        prov_gdfs_after = {}
         for st_id in service_types.index:
             st_name = service_types.loc[st_id, "name"]
             if st_name in facade._chosen_service_types:
                 prov_df = facade._provision_adapter.get_last_provision_df(st_name)
                 prov_gdf = blocks[["geometry"]].join(prov_df, how="right")
                 prov_gdf = prov_gdf.to_crs(4326)
-                prov_gdfs[st_name] = prov_gdf
+                prov_gdfs_after[st_name] = prov_gdf
 
         prov_totals = {}
-        for st_name, prov_gdf in prov_gdfs.items():
+        for st_name, prov_gdf in prov_gdfs_after.items():
             if prov_gdf.demand.sum() == 0:
                 total = None
             else:
@@ -892,13 +904,19 @@ class EffectsService:
             prov_totals[st_name] = total
 
         prov_json = {
-            name: json.loads(gdf.to_json(drop_id=True))
-            for name, gdf in prov_gdfs.items()
+            n: json.loads(gdf.to_json(drop_id=True))
+            for n, gdf in prov_gdfs_after.items()
         }
-        cache.save(method_name, scen_id, params.model_dump(), prov_json)
 
-        # response = prov_gdfs[params.required_service]
-        return prov_gdfs
+        cache.save(
+            method_name,
+            params.scenario_id,
+            params.model_dump(),
+            prov_json,
+            scenario_updated_at=updated_at,
+        )
+
+        return prov_gdfs_after
 
 
 effects_service = EffectsService()
