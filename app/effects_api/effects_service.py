@@ -130,114 +130,6 @@ class EffectsService:
             return params
         return params
 
-    # @staticmethod
-    # async def aggregate_blocks_layer_scenario(
-    #     scenario_id: int,
-    #     functional_zone_source: str = None,
-    #     functional_zone_year: int = None,
-    #     token: str = None,
-    # ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    #     """
-    #     Params:
-    #     scenario_id : int
-    #         ID of the scenario whose blocks are processed.
-    #     functional_zone_source : str | None, default None
-    #         Preferred source of functional-zone polygons
-    #         (e.g. "PZZ", "OSM", "User").
-    #         If None, the helper picks the best available source (PZZ).
-    #     functional_zone_year : int | None, default None
-    #         Year of the functional-zone dataset. `None` → latest available.
-    #     token : str | None, default None
-    #         Optional bearer token passed to Urban API.
-    #
-    #     Returns:
-    #     tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]
-    #         blocks_gdf– scenario blocks enriched with:
-    #           site_area, land-use shares, building counts and per-service
-    #           capacities/ counts.
-    #         buildings_gdf – original (optionally projected) buildings
-    #           used for aggregation."""
-    #
-    #     logger.info(f"Aggregating unified blocks layer for scenario {scenario_id}")
-    #
-    #     logger.info("Starting generating scenario blocks layer")
-    #     scenario_blocks_gdf = await get_scenario_blocks(scenario_id, token)
-    #     scenario_blocks_crs = scenario_blocks_gdf.crs
-    #     scenario_blocks_gdf["site_area"] = scenario_blocks_gdf.area
-    #
-    #     scenario_functional_zones = await get_scenario_functional_zones(
-    #         scenario_id, token, functional_zone_source, functional_zone_year
-    #     )
-    #     scenario_functional_zones = scenario_functional_zones.to_crs(
-    #         scenario_blocks_crs
-    #     )
-    #     scenario_blocks_lu = assign_land_use(
-    #         scenario_blocks_gdf, scenario_functional_zones, LAND_USE_RULES
-    #     )
-    #     scenario_blocks_gdf = scenario_blocks_gdf.join(
-    #         scenario_blocks_lu.drop(columns=["geometry"])
-    #     )
-    #     logger.success(f"Land use for scenario blocks have been assigned {scenario_id}")
-    #
-    #     scenario_buildings_gdf = await get_scenario_buildings(scenario_id, token)
-    #     if scenario_buildings_gdf is not None:
-    #         scenario_buildings_gdf = scenario_buildings_gdf.to_crs(
-    #             scenario_blocks_gdf.crs
-    #         )
-    #         blocks_buildings, _ = aggregate_objects(
-    #             scenario_blocks_gdf, scenario_buildings_gdf
-    #         )
-    #         scenario_blocks_gdf = scenario_blocks_gdf.join(
-    #             blocks_buildings.drop(columns=["geometry"]).rename(
-    #                 columns={"count": "count_buildings"}
-    #             )
-    #         )
-    #         scenario_blocks_gdf["count_buildings"] = (
-    #             scenario_blocks_gdf["count_buildings"].fillna(0).astype(int)
-    #         )
-    #         if "is_living" not in scenario_blocks_gdf.columns:
-    #             (
-    #                 scenario_blocks_gdf["count_buildings"],
-    #                 scenario_blocks_gdf["is_living"],
-    #             ) = (0, None)
-    #
-    #     logger.success(
-    #         f"Buildings for scenario blocks have been aggregated {scenario_id}"
-    #     )
-    #
-    #     service_types = await urban_api_gateway.get_service_types()
-    #     service_types = await adapt_service_types(service_types)
-    #
-    #     scenario_services_dict = await get_scenario_services(
-    #         scenario_id, service_types, token
-    #     )
-    #
-    #     for service_type, services in scenario_services_dict.items():
-    #         services = services.to_crs(scenario_blocks_gdf.crs)
-    #         scenario_blocks_services, _ = aggregate_objects(
-    #             scenario_blocks_gdf, services
-    #         )
-    #         scenario_blocks_services["capacity"] = (
-    #             scenario_blocks_services["capacity"].fillna(0).astype(int)
-    #         )
-    #         scenario_blocks_services["count"] = (
-    #             scenario_blocks_services["count"].fillna(0).astype(int)
-    #         )
-    #         scenario_blocks_gdf = scenario_blocks_gdf.join(
-    #             scenario_blocks_services.drop(columns=["geometry"]).rename(
-    #                 columns={
-    #                     "capacity": f"capacity_{service_type}",
-    #                     "count": f"count_{service_type}",
-    #                 }
-    #             )
-    #         )
-    #
-    #     scenario_blocks_gdf["is_project"] = True
-    #     logger.success(
-    #         f"Services for scenario blocks have been aggregated {scenario_id}"
-    #     )
-    #
-    #     return scenario_blocks_gdf, scenario_buildings_gdf
     @staticmethod
     async def load_blocks_scenario(scenario_id: int, token: str) -> gpd.GeoDataFrame:
         gdf = await get_scenario_blocks(scenario_id, token)
@@ -432,105 +324,6 @@ class EffectsService:
 
         logger.success(f"[context {scenario_id}] blocks layer ready")
         return blocks, buildings
-
-    # @staticmethod
-    # async def aggregate_blocks_layer_context(
-    #     scenario_id: int,
-    #     context_functional_zone_source: str = None,
-    #     context_functional_zone_year: int = None,
-    #     token: str = None,
-    # ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    #     """Build a GeoDataFrame for context blocks (territories neighbouring the
-    #     project) and enrich it with land-use, building and service attributes.
-    #
-    #     Params:
-    #     scenario_id : int
-    #         Parent scenario (used only to fetch project ID).
-    #     context_functional_zone_source : str | None, default None
-    #         Functional-zone source for context territories.
-    #     context_functional_zone_year : int | None, default None
-    #         Year of the functional-zone dataset for context territories.
-    #     token : str | None, default None
-    #         Optional bearer token for Urban API.
-    #
-    #     Returns:
-    #     tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]
-    #         context_blocks_gdf – enriched context blocks.
-    #         context_buildings_gdf – buildings aggregated into the blocks
-    #     """
-    #
-    #     logger.info("Starting generating context blocks layer")
-    #     project_id = await urban_api_gateway.get_project_id(scenario_id, token)
-    #     context_blocks_gdf = await get_context_blocks(project_id)
-    #     context_blocks_crs = context_blocks_gdf.crs
-    #     context_blocks_gdf = context_blocks_gdf.to_crs(context_blocks_crs)
-    #     context_blocks_gdf["site_area"] = context_blocks_gdf.area
-    #
-    #     context_functional_zones = await get_context_functional_zones(
-    #         project_id,
-    #         context_functional_zone_source,
-    #         context_functional_zone_year,
-    #         token,
-    #     )
-    #     context_functional_zones = context_functional_zones.to_crs(context_blocks_crs)
-    #     context_blocks_lu = assign_land_use(
-    #         context_blocks_gdf, context_functional_zones, LAND_USE_RULES
-    #     )
-    #     context_blocks_gdf = context_blocks_gdf.join(
-    #         context_blocks_lu.drop(columns=["geometry"])
-    #     )
-    #     logger.success(f"Land use for context blocks have been assigned {scenario_id}")
-    #
-    #     context_buildings_gdf = await get_context_buildings(project_id)
-    #
-    #     if context_buildings_gdf is not None:
-    #         context_buildings_gdf = context_buildings_gdf.to_crs(context_blocks_gdf.crs)
-    #         context_blocks_buildings, _ = aggregate_objects(
-    #             context_blocks_gdf, context_buildings_gdf
-    #         )
-    #         context_blocks_gdf = context_blocks_gdf.join(
-    #             context_blocks_buildings.drop(columns=["geometry"]).rename(
-    #                 columns={"count": "count_buildings"}
-    #             )
-    #         )
-    #         context_blocks_gdf["count_buildings"] = (
-    #             context_blocks_gdf["count_buildings"].fillna(0).astype(int)
-    #         )
-    #         if "is_living" not in context_blocks_gdf.columns:
-    #             (
-    #                 context_blocks_gdf["count_buildings"],
-    #                 context_blocks_gdf["is_living"],
-    #             ) = (0, None)
-    #     logger.success(
-    #         f"Buildings for context blocks have been aggregated {scenario_id}"
-    #     )
-    #
-    #     service_types = await urban_api_gateway.get_service_types()
-    #     service_types = await adapt_service_types(service_types)
-    #     context_services_dict = await get_context_services(project_id, service_types)
-    #
-    #     for service_type, services in context_services_dict.items():
-    #         services = services.to_crs(context_blocks_gdf.crs)
-    #         context_blocks_services, _ = aggregate_objects(context_blocks_gdf, services)
-    #         context_blocks_services["capacity"] = (
-    #             context_blocks_services["capacity"].fillna(0).astype(int)
-    #         )
-    #         context_blocks_services["count"] = (
-    #             context_blocks_services["count"].fillna(0).astype(int)
-    #         )
-    #         context_blocks_gdf = context_blocks_gdf.join(
-    #             context_blocks_services.drop(columns=["geometry"]).rename(
-    #                 columns={
-    #                     "capacity": f"capacity_{service_type}",
-    #                     "count": f"count_{service_type}",
-    #                 }
-    #             )
-    #         )
-    #     logger.success(
-    #         f"Services for context blocks have been aggregated {scenario_id}"
-    #     )
-    #
-    #     return context_blocks_gdf, context_buildings_gdf
 
     @staticmethod
     async def get_services_layer(scenario_id: int, token: str):
@@ -899,7 +692,6 @@ class EffectsService:
             ~service_types["infrastructure_type"].isna()
         ].copy()
 
-        # вот тут проблема что ource и year функциональных зон выбираются для сценария, который был подан, а затем пытаются примениться для базового сценария
         params = await self.get_optimal_func_zone_data(params, token)
         base_src, base_year = (
             await urban_api_gateway.get_optimal_func_zone_request_data(
@@ -1045,7 +837,7 @@ class EffectsService:
                 ].fillna(0)
             else:
                 logger.info(
-                    f"#{st_id}:{st_name} does not exist on territory. Adding empty GeoDataFrame"
+                    f"{st_id}:{st_name} does not exist on territory. Adding empty GeoDataFrame"
                 )
                 df = after_blocks[[]].copy()
                 df["capacity"] = 0
@@ -1077,23 +869,17 @@ class EffectsService:
             st_name = service_types.loc[st_id, "name"]
             if st_name in facade._chosen_service_types:
                 prov_df = facade._provision_adapter.get_last_provision_df(st_name)
-                # prov_gdf = scenario_blocks[["geometry"]].join(prov_df, how="right")
-                # prov_gdf = prov_gdf.to_crs(4326)
                 prov_gdf = (
-                    context_blocks[["geometry"]]
-                    .concat(prov_df, how="outer")
+                    after_blocks[["geometry"]]
+                    .join(prov_df, how="left")
                     .to_crs(4326)
                     .drop(columns="provision_weak", errors="ignore")
                 )
-                prov_gdfs_after[st_name] = prov_gdf
-
-        prov_totals = {}
-        for st_name, prov_gdf in prov_gdfs_after.items():
-            if prov_gdf.demand.sum() == 0:
-                total = None
-            else:
-                total = float(provision_strong_total(prov_gdf))
-            prov_totals[st_name] = total
+                num_cols = prov_gdf.select_dtypes(include="number").columns
+                prov_gdf[num_cols] = prov_gdf[num_cols].fillna(0)
+                prov_gdfs_after[st_name] = gpd.GeoDataFrame(
+                    prov_gdf, geometry="geometry", crs="EPSG:4326"
+                )
 
         from_cache = cached["data"] if cached else {}
         from_cache["after"] = {n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_after.items()}
