@@ -44,14 +44,14 @@ class FileCache:
         data: dict[str, Any],
         scenario_updated_at: str | None = None,
     ) -> Path:
-
+        """
+        Always write (or overwrite) the cache file so that both
+        'before' and 'after' can be stored in the same JSON.
+        """
         phash = self.params_hash(params)
         day = datetime.now().strftime("%Y%m%d")
 
         path = _file_name(method, scenario_id, phash, day)
-        if path.exists():
-            return path
-
         to_save = {
             "meta": {
                 "timestamp": datetime.now().isoformat(),

@@ -69,15 +69,18 @@ class EffectsService:
         self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
 
-    async def _make_params_for_hash(
+    async def build_hash_params(
         self,
         params: ContextDevelopmentDTO | DevelopmentDTO,
-        base_scen_id: int,
         token: str,
     ) -> dict:
+        project_id = (
+            await urban_api_gateway.get_scenario_info(params.scenario_id, token)
+        )["project"]["project_id"]
+        base_scenario_id = await urban_api_gateway.get_base_scenario_id(project_id)
         base_src, base_year = (
             await urban_api_gateway.get_optimal_func_zone_request_data(
-                token, base_scen_id, None, None
+                token, base_scenario_id, None, None
             )
         )
         return params.model_dump() | {
@@ -208,20 +211,20 @@ class EffectsService:
         token: str | None = None,
     ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
 
-        logger.info(f"[scenario {scenario_id}] ▶ load blocks")
+        logger.info(f"[Scenario {scenario_id}] load blocks")
         blocks = await self.load_blocks_scenario(scenario_id, token)
 
-        logger.info("land-use")
+        logger.info("Assigning land-use for scenario")
         blocks = await self.assign_land_use_to_blocks_scenario(
             blocks, scenario_id, source, year, token
         )
 
-        logger.info("buildings")
+        logger.info("Aggregating buildings for scenario")
         blocks, buildings = await self.enrich_with_buildings_scenario(
             blocks, scenario_id, token
         )
 
-        logger.info("services")
+        logger.info("Aggregating services for scenario")
         blocks = await self.enrich_with_services_scenario(blocks, scenario_id, token)
 
         blocks["is_project"] = True
@@ -308,21 +311,21 @@ class EffectsService:
         token: str | None = None,
     ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
 
-        logger.info(f"[context {scenario_id}] ▶ load blocks")
+        logger.info(f"[Context {scenario_id}] load blocks")
         blocks, project_id = await self.load_context_blocks(scenario_id, token)
 
-        logger.info("▶ land-use")
+        logger.info("Assigning land-use for context")
         blocks = await self.assign_land_use_context(
             blocks, project_id, source, year, token
         )
 
-        logger.info("▶ buildings")
+        logger.info("Aggregating buildings for context")
         blocks, buildings = await self.enrich_with_context_buildings(blocks, project_id)
 
-        logger.info("▶ services")
+        logger.info("Aggregating services for context")
         blocks = await self.enrich_with_context_services(blocks, project_id, token)
 
-        logger.success(f"[context {scenario_id}] blocks layer ready")
+        logger.success(f"[Context {scenario_id}] blocks layer ready")
         return blocks, buildings
 
     @staticmethod
@@ -727,13 +730,13 @@ class EffectsService:
             prov_gdf = prov_gdf.drop(axis="columns", columns="provision_weak")
             prov_gdfs_before[st_name] = prov_gdf
 
-        prov_totals = {}
-        for st_name, prov_gdf in prov_gdfs_before.items():
-            if prov_gdf.demand.sum() == 0:
-                total = None
-            else:
-                total = float(provision_strong_total(prov_gdf))
-            prov_totals[st_name] = total
+        # prov_totals = {}
+        # for st_name, prov_gdf in prov_gdfs_before.items():
+        #     if prov_gdf.demand.sum() == 0:
+        #         total = None
+        #     else:
+        #         total = float(provision_strong_total(prov_gdf))
+        #     prov_totals[st_name] = total
 
         existing_data = cached["data"] if cached else {}
         existing_data["before"] = {
@@ -765,7 +768,8 @@ class EffectsService:
 
         params = await self.get_optimal_func_zone_data(params, token)
 
-        phash = cache.params_hash(params.model_dump())
+        params_for_hash = await self.build_hash_params(params, token)
+        phash = cache.params_hash(params_for_hash)
 
         cached = cache.load(method_name, params.scenario_id, phash)
         if (
@@ -887,7 +891,7 @@ class EffectsService:
         cache.save(
             method_name,
             params.scenario_id,
-            params.model_dump(),
+            params_for_hash,
             from_cache,
             scenario_updated_at=updated_at,
         )
@@ -903,33 +907,27 @@ class EffectsService:
         info = await urban_api_gateway.get_scenario_info(params.scenario_id, token)
         is_based = info["is_based"]
         updated_at = info["updated_at"]
-        project_id = info["project"]["project_id"]
-        base_scenario_id = await urban_api_gateway.get_base_scenario_id(project_id)
 
         prov_before = await self.territory_transformation_scenario_before(token, params)
-
         if is_based:
             return prov_before
 
-        params_for_hash = await self._make_params_for_hash(
-            params, base_scenario_id, token
-        )
+        params_for_hash = await self.build_hash_params(params, token)
         phash = cache.params_hash(params_for_hash)
-        cached = cache.load("territory_transformation", params.scenario_id, phash)
 
+        cached = cache.load("territory_transformation", params.scenario_id, phash)
         if (
             cached
             and cached["meta"]["scenario_updated_at"] == updated_at
             and "after" in cached["data"]
         ):
             prov_after = {
-                n: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
-                for n, fc in cached["data"]["after"].items()
+                name: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
+                for name, fc in cached["data"]["after"].items()
             }
             return {"before": prov_before, "after": prov_after}
 
         prov_after = await self.territory_transformation_scenario_after(token, params)
-
         return {"before": prov_before, "after": prov_after}
 
 

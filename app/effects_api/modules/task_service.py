@@ -48,7 +48,6 @@ class AnyTask:
             logger.info(f"[{self.task_id}] started")
             self.status = "running"
 
-            # 1. Пытаемся взять кэш по (method, id, hash)
             cached = cache.load(self.method, self.scenario_id, self.param_hash)
             if cached:
                 logger.info(f"[{self.task_id}] loaded from cache")
@@ -71,13 +70,6 @@ class AnyTask:
                 }
             else:
                 data_to_cache = raw_data
-
-            cache.save(
-                self.method,
-                self.scenario_id,
-                self.params.model_dump(),
-                data_to_cache,
-            )
 
             self.result = data_to_cache
             self.status = "done"
