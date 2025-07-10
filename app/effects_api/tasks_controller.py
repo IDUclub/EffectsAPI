@@ -64,29 +64,21 @@ async def task_status(task_id: str):
 
 
 @router.get("/territory_transformation/{scenario_id}/{service_name}")
-async def get_tt_layer(scenario_id: int, service_name: str, is_based: bool = False):
-    """
-    Returns FeatureCollections for requested service.
-
-    If is_based = true (only «before») — return single FC.
-    If is_based = false — returns FC from cached `{"before": …, "after": …}`.
-    """
+async def get_tt_layer(scenario_id: int, service_name: str):
     cached = cache.load_latest("territory_transformation", scenario_id)
     if not cached:
-        raise http_exception(404, "no cached result for this scenario", scenario_id)
+        raise http_exception(404, "no saved result for this scenario", scenario_id)
 
     data: dict = cached["data"]
-    has_after = "after" in data
 
-    if is_based or not has_after:
-        fcoll = data["before"].get(service_name)
-        if not fcoll:
+    if "after" not in data:
+        fc = data["before"].get(service_name)
+        if not fc:
             raise http_exception(404, f"service '{service_name}' not found")
-        return JSONResponse(content=fcoll)
+        return JSONResponse(content=fc)
 
     fc_before = data["before"].get(service_name)
     fc_after = data["after"].get(service_name)
-
     if not (fc_before and fc_after):
         raise http_exception(404, f"service '{service_name}' not found")
 

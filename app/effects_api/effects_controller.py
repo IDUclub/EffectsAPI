@@ -63,7 +63,7 @@ async def territory_transformation(
     params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
     token: str = Depends(verify_token),
 ):
-    gdf = await effects_service.territory_transformation_scenario(token, params)
+    gdf = await effects_service.territory_transformation_scenario_before(token, params)
     gdf = gdf.to_crs(4326)
 
     geojson_dict = json.loads(gdf.to_json(drop_id=True))

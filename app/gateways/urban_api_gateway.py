@@ -354,3 +354,14 @@ class UrbanAPIGateway:
         if isinstance(geom, dict):
             geom = json.dumps(geom)
         return shapely.from_geojson(geom)
+
+    async def get_base_scenario_id(self, project_id: int) -> int:
+        scenarios = await self.json_handler.get(
+            f"/api/v1/projects/{project_id}/scenarios"
+        )
+
+        base = next((s for s in scenarios if s.get("is_based")), None)
+        if not base:
+            raise http_exception(404, "base scenario not found", project_id)
+
+        return base["scenario_id"]

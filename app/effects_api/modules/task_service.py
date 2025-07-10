@@ -16,7 +16,7 @@ from app.effects_api.effects_service import effects_service
 MethodFunc = Callable[[str, Any], "dict[str, Any]"]
 
 TASK_METHODS: dict[str, MethodFunc] = {
-    "territory_transformation": effects_service.territory_transformation_scenario,
+    "territory_transformation": effects_service.territory_transformation,
 }
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()
