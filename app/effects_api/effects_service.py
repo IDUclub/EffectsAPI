@@ -117,15 +117,12 @@ class EffectsService:
                     not params.context_func_zone_source
                     or not params.context_func_source_year
                 ):
-                    project_id = await urban_api_gateway.get_project_id(
-                        params.scenario_id, token
-                    )
                     (
                         params.context_func_zone_source,
                         params.context_func_source_year,
                     ) = await urban_api_gateway.get_optimal_func_zone_request_data(
                         token,
-                        project_id,
+                        params.scenario_id,
                         params.context_func_zone_source,
                         params.context_func_source_year,
                         project=False,
@@ -237,29 +234,29 @@ class EffectsService:
         scenario_id: int, token: str
     ) -> tuple[gpd.GeoDataFrame, int]:
         project_id = await urban_api_gateway.get_project_id(scenario_id, token)
-        blocks = await get_context_blocks(project_id)
+        blocks = await get_context_blocks(project_id, scenario_id)
         blocks["site_area"] = blocks.area
         return blocks, project_id
 
     @staticmethod
     async def assign_land_use_context(
         blocks: gpd.GeoDataFrame,
-        project_id: int,
+        scenario_id: int,
         source: str | None,
         year: int | None,
         token: str,
     ) -> gpd.GeoDataFrame:
-        fzones = await get_context_functional_zones(project_id, source, year, token)
+        fzones = await get_context_functional_zones(scenario_id, source, year, token)
         fzones = fzones.to_crs(blocks.crs)
         lu = assign_land_use(blocks, fzones, LAND_USE_RULES)
         return blocks.join(lu.drop(columns=["geometry"]))
 
     @staticmethod
     async def enrich_with_context_buildings(
-        blocks: gpd.GeoDataFrame, project_id: int
+        blocks: gpd.GeoDataFrame, scenario_id: int
     ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
 
-        buildings = await get_context_buildings(project_id)
+        buildings = await get_context_buildings(scenario_id)
         if buildings is None:
             blocks["count_buildings"] = 0
             blocks["is_living"] = None
@@ -279,12 +276,12 @@ class EffectsService:
 
     @staticmethod
     async def enrich_with_context_services(
-        blocks: gpd.GeoDataFrame, project_id: int, token: str
+        blocks: gpd.GeoDataFrame, scenario_id: int, token: str
     ) -> gpd.GeoDataFrame:
 
         stypes = await urban_api_gateway.get_service_types()
         stypes = await adapt_service_types(stypes)
-        sdict = await get_context_services(project_id, stypes)
+        sdict = await get_context_services(scenario_id, stypes)
 
         for stype, services in sdict.items():
             services = services.to_crs(blocks.crs)
@@ -316,14 +313,14 @@ class EffectsService:
 
         logger.info("Assigning land-use for context")
         blocks = await self.assign_land_use_context(
-            blocks, project_id, source, year, token
+            blocks, scenario_id, source, year, token
         )
 
         logger.info("Aggregating buildings for context")
-        blocks, buildings = await self.enrich_with_context_buildings(blocks, project_id)
+        blocks, buildings = await self.enrich_with_context_buildings(blocks, scenario_id)
 
         logger.info("Aggregating services for context")
-        blocks = await self.enrich_with_context_services(blocks, project_id, token)
+        blocks = await self.enrich_with_context_services(blocks, scenario_id, token)
 
         logger.success(f"[Context {scenario_id}] blocks layer ready")
         return blocks, buildings

@@ -18,10 +18,10 @@ class UrbanAPIGateway:
 
     # TODO context
     async def get_physical_objects(
-        self, project_id: int, **kwargs: dict
+        self, scenario_id: int, **kwargs: dict
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/context/physical_objects_with_geometry",
+            f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
             params=kwargs,
         )
         features = res["features"]
@@ -29,9 +29,9 @@ class UrbanAPIGateway:
             "physical_object_id"
         )
 
-    async def get_services(self, project_id: int, **kwargs: Any) -> gpd.GeoDataFrame:
+    async def get_services(self, scenario_id: int, **kwargs: Any) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/context/services_with_geometry",
+            f"/api/v1/scenarios/{scenario_id}/context/services_with_geometry",
             params=kwargs,
         )
         features = res["features"]
@@ -39,17 +39,17 @@ class UrbanAPIGateway:
             "service_id"
         )
 
-    async def get_functional_zones_sources(self, project_id: int) -> pd.DataFrame:
+    async def get_functional_zones_sources(self, scenario_id: int) -> pd.DataFrame:
         res = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/context/functional_zone_sources"
+            f"/api/v1/scenarios/{scenario_id}/context/functional_zone_sources"
         )
         return pd.DataFrame(res)
 
     async def get_functional_zones(
-        self, project_id: int, year: int, source: int
+        self, scenario_id: int, year: int, source: int
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/context/functional_zones",
+            f"/api/v1/scenarios/{scenario_id}/context/functional_zones",
             params={"year": year, "source": source},
         )
         features = res["features"]
@@ -229,7 +229,7 @@ class UrbanAPIGateway:
             )
         else:
             available_sources = await self.json_handler.get(
-                f"/api/v1/projects/{data_id}/context/functional_zone_sources",
+                f"/api/v1/scenarios/{data_id}/context/functional_zone_sources",
                 headers=headers,
             )
         sources_df = pd.DataFrame.from_records(available_sources)

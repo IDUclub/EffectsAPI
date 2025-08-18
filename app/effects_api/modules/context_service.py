@@ -34,29 +34,29 @@ async def _get_context_boundaries(project_id: int) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(geometry=geometries, crs=4326)
 
 
-async def _get_context_roads(project_id: int):
+async def _get_context_roads(scenario_id: int):
     gdf = await urban_api_gateway.get_physical_objects(
-        project_id, physical_object_function_id=ROADS_ID
+        scenario_id, physical_object_function_id=ROADS_ID
     )
     return gdf[["geometry"]].reset_index(drop=True)
 
 
-async def _get_context_water(project_id: int):
+async def _get_context_water(scenario_id: int):
     gdf = await urban_api_gateway.get_physical_objects(
-        project_id, physical_object_function_id=WATER_ID
+        scenario_id, physical_object_function_id=WATER_ID
     )
     return gdf[["geometry"]].reset_index(drop=True)
 
 
 async def _get_context_blocks(
-    project_id: int, boundaries: gpd.GeoDataFrame
+    scenario_id: int, boundaries: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame:
     crs = boundaries.crs
     boundaries.geometry = boundaries.buffer(-1)
 
-    water = await _get_context_water(project_id)
+    water = await _get_context_water(scenario_id)
     water = water.to_crs(crs)
-    roads = await _get_context_roads(project_id)
+    roads = await _get_context_roads(scenario_id)
     roads = roads.to_crs(crs)
     roads.geometry = close_gaps(roads, 1)
 
@@ -65,7 +65,7 @@ async def _get_context_blocks(
     return blocks
 
 
-async def get_context_blocks(project_id: int):
+async def get_context_blocks(project_id: int, scenario_id: int):
     project_boundaries = await _get_project_boundaries(project_id)
     context_boundaries = await _get_context_boundaries(project_id)
 
@@ -76,16 +76,16 @@ async def get_context_blocks(project_id: int):
     context_boundaries = context_boundaries.overlay(
         project_boundaries, how="difference"
     )
-    return await _get_context_blocks(project_id, context_boundaries)
+    return await _get_context_blocks(scenario_id, context_boundaries)
 
 
 async def get_context_functional_zones(
-    project_id: int, source: str, year: int, token: str
+    scenario_id: int, source: str, year: int, token: str
 ) -> gpd.GeoDataFrame:
-    sources_df = await urban_api_gateway.get_functional_zones_sources(project_id)
+    sources_df = await urban_api_gateway.get_functional_zones_sources(scenario_id)
     year, source = await _get_best_functional_zones_source(sources_df, source, year)
     functional_zones = await urban_api_gateway.get_functional_zones(
-        project_id, year, source
+        scenario_id, year, source
     )
     functional_zones = functional_zones.loc[
         functional_zones.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
@@ -93,17 +93,17 @@ async def get_context_functional_zones(
     return adapt_functional_zones(functional_zones)
 
 
-async def get_context_buildings(project_id: int):
+async def get_context_buildings(scenario_id: int):
     gdf = await urban_api_gateway.get_physical_objects(
-        project_id, physical_object_type_id=LIVING_BUILDINGS_ID, centers_only=True
+        scenario_id, physical_object_type_id=LIVING_BUILDINGS_ID, centers_only=True
     )
     gdf = adapt_buildings(gdf.reset_index(drop=True))
     crs = gdf.estimate_utm_crs()
     return impute_buildings(gdf.to_crs(crs)).to_crs(4326)
 
 
-async def get_context_services(project_id: int, service_types: pd.DataFrame):
-    gdf = await urban_api_gateway.get_services(project_id, centers_only=True)
+async def get_context_services(scenario_id: int, service_types: pd.DataFrame):
+    gdf = await urban_api_gateway.get_services(scenario_id, centers_only=True)
     gdf = gdf.to_crs(gdf.estimate_utm_crs())
     gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
     return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
