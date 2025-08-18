@@ -13,6 +13,7 @@ from .dto.development_dto import (
     SocioEconomicPredictionDTO,
 )
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
+from .dto.values_development_dto import ValuesDevelopmentDTO
 from .effects_service import effects_service
 from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
@@ -68,3 +69,10 @@ async def territory_transformation(
 
     geojson_dict = json.loads(gdf.to_json(drop_id=True))
     return JSONResponse(content=geojson_dict)
+
+@development_router.get("/values_development")
+async def values_development(
+    params: Annotated[ValuesDevelopmentDTO, Depends(ValuesDevelopmentDTO)],
+    token: str = Depends(verify_token)
+):
+    return await effects_service.values_transformation(token, params)

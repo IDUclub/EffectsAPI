@@ -1,10 +1,10 @@
 import json
-from typing import Any, Literal
+from typing import Any
 
 import geopandas as gpd
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
-from blocksnet.analysis.provision import competitive_provision, provision_strong_total
+from blocksnet.analysis.provision import competitive_provision
 from blocksnet.blocks.aggregation import aggregate_objects
 from blocksnet.blocks.assignment import assign_land_use
 from blocksnet.config import service_types_config
@@ -12,9 +12,7 @@ from blocksnet.enums import LandUse
 from blocksnet.machine_learning.regression import DensityRegressor, SocialRegressor
 from blocksnet.optimization.services import (
     AreaSolution,
-    BlockSolution,
     Facade,
-    GradientChooser,
     SimpleChooser,
     TPEOptimizer,
     WeightedConstraints,
@@ -36,8 +34,9 @@ from app.effects_api.modules.scenario_service import (
     get_scenario_services,
 )
 from app.effects_api.modules.service_type_service import adapt_service_types
+from .dto.values_development_dto import ValuesDevelopmentDTO
 
-from ..common.caching.caching_service import _to_dt, cache
+from ..common.caching.caching_service import cache
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..common.utils.geodata import _fc_to_gdf, _gdf_to_ru_fc
 from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
@@ -46,7 +45,6 @@ from .dto.development_dto import (
     DevelopmentDTO,
     SocioEconomicPredictionDTO,
 )
-from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .modules.context_service import (
     get_context_blocks,
     get_context_buildings,
@@ -90,7 +88,7 @@ class EffectsService:
 
     @staticmethod
     async def get_optimal_func_zone_data(
-        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO,
+        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO | ValuesDevelopmentDTO,
         token: str,
     ) -> DevelopmentDTO:
         """
@@ -750,8 +748,41 @@ class EffectsService:
 
         return prov_gdfs_before
 
+
+    def _build_facade(
+            self,
+            after_blocks: gpd.GeoDataFrame,
+            acc_mx: pd.DataFrame,
+            service_types: pd.DataFrame,
+    ) -> Facade:
+        blocks_lus = after_blocks.loc[after_blocks["is_project"], "land_use"]
+        blocks_lus = blocks_lus[~blocks_lus.isna()].to_dict()
+
+        var_adapter = AreaSolution(blocks_lus)
+
+        facade = Facade(
+            blocks_lu=blocks_lus,
+            blocks_df=after_blocks,
+            accessibility_matrix=acc_mx,
+            var_adapter=var_adapter,
+        )
+
+        for st_id, row in service_types.iterrows():
+            st_name = row["name"]
+            st_weight = row["infrastructure_weight"]
+            st_column = f"capacity_{st_name}"
+
+            if st_column in after_blocks.columns:
+                df = after_blocks.rename(columns={st_column: "capacity"})[["capacity"]].fillna(0)
+            else:
+                df = after_blocks[[]].copy()
+                df["capacity"] = 0
+            facade.add_service_type(st_name, st_weight, df)
+
+        return facade
+
     async def territory_transformation_scenario_after(
-        self, token, params: ContextDevelopmentDTO
+        self, token, params: ContextDevelopmentDTO | DevelopmentDTO
     ):
         # provision after
         method_name = "territory_transformation"
@@ -815,34 +846,8 @@ class EffectsService:
             service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
             * service_types["infrastructure_weight"]
         )
-        blocks_lus = after_blocks.loc[after_blocks["is_project"], "land_use"]
-        blocks_lus = blocks_lus[~blocks_lus.isna()]
-        blocks_lus = blocks_lus.to_dict()
 
-        var_adapter = AreaSolution(blocks_lus)
-
-        facade = Facade(
-            blocks_lu=blocks_lus,
-            blocks_df=after_blocks,
-            accessibility_matrix=acc_mx,
-            var_adapter=var_adapter,
-        )
-
-        for st_id, row in service_types.iterrows():
-            st_name = row["name"]
-            st_weight = row["infrastructure_weight"]
-            st_column = f"capacity_{st_name}"
-            if st_column in after_blocks.columns:
-                df = after_blocks.rename(columns={st_column: "capacity"})[
-                    ["capacity"]
-                ].fillna(0)
-            else:
-                logger.info(
-                    f"{st_id}:{st_name} does not exist on territory. Adding empty GeoDataFrame"
-                )
-                df = after_blocks[[]].copy()
-                df["capacity"] = 0
-            facade.add_service_type(st_name, st_weight, df)
+        facade = self._build_facade(after_blocks, acc_mx, service_types)
 
         services_weights = service_types.set_index("name")[
             "infrastructure_weight"
@@ -884,6 +889,9 @@ class EffectsService:
 
         from_cache = cached["data"] if cached else {}
         from_cache["after"] = {n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_after.items()}
+        from_cache["opt_context"] = {
+            "best_x": best_x,
+        }
 
         cache.save(
             method_name,
@@ -926,6 +934,73 @@ class EffectsService:
 
         prov_after = await self.territory_transformation_scenario_after(token, params)
         return {"before": prov_before, "after": prov_after}
+
+    async def values_transformation(
+            self,
+            token: str,
+            params: ValuesDevelopmentDTO,
+    ) -> pd.DataFrame:
+
+        method_name = "territory_transformation"
+        params = await self.get_optimal_func_zone_data(params, token)
+
+        params_for_hash = await self.build_hash_params(params, token)
+        phash = cache.params_hash(params_for_hash)
+
+        info = await urban_api_gateway.get_scenario_info(params.scenario_id, token)
+        updated_at = info["updated_at"]
+
+        cached = cache.load(method_name, params.scenario_id, phash)
+
+        need_refresh = (
+                not cached
+                or cached["meta"]["scenario_updated_at"] != updated_at
+                or "opt_context" not in cached["data"]
+                or "best_x" not in cached["data"]["opt_context"]
+        )
+        if need_refresh:
+            await self.territory_transformation_scenario_after(token, params)
+            cached = cache.load(method_name, params.scenario_id, phash)
+
+        best_x = cached["data"]["opt_context"]["best_x"]
+
+        context_blocks, _ = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
+        )
+        scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
+            params.scenario_id,
+            params.proj_func_zone_source,
+            params.proj_func_source_year,
+            token,
+        )
+        after_blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
+        after_blocks["is_project"] = after_blocks["is_project"].fillna(False).astype(bool)
+
+        graph = get_accessibility_graph(after_blocks, "intermodal")
+        acc_mx = calculate_accessibility_matrix(after_blocks, graph)
+
+        service_types = await urban_api_gateway.get_service_types()
+        service_types = await adapt_service_types(service_types)
+        service_types = service_types[~service_types["infrastructure_type"].isna()].copy()
+        service_types["infrastructure_weight"] = (
+                service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
+                * service_types["infrastructure_weight"]
+        )
+
+        facade = self._build_facade(after_blocks, acc_mx, service_types)
+
+        solution_df = facade.solution_to_services_df(best_x)
+
+        if params.required_service:
+            solution_df = solution_df.loc[solution_df["service_type"] == params.required_service]
+
+        result = json.loads(
+            solution_df.to_json(orient="records", date_format="iso")
+        )
+        return result
 
 
 effects_service = EffectsService()
