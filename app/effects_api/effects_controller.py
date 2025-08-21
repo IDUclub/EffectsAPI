@@ -76,3 +76,10 @@ async def values_development(
     token: str = Depends(verify_token)
 ):
     return await effects_service.values_transformation(token, params)
+
+@development_router.get("/values_oriented_requirements")
+async def values_requirements(
+        params: Annotated[ValuesDevelopmentDTO, Depends(ValuesDevelopmentDTO)],
+        token: str = Depends(verify_token)
+):
+    return await effects_service.values_oriented_requirements(token, params)

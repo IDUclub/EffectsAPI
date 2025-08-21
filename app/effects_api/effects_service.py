@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
 from blocksnet.analysis.provision import competitive_provision
@@ -639,13 +640,15 @@ class EffectsService:
             blocks, acc_mx, accessibility
         )
         capacity_column = f"capacity_{service_type}"
-        if capacity_column not in blocks.columns:
-            blocks_df = blocks[["geometry", "population"]].fillna(0)
-            blocks_df["capacity"] = 0
+        if capacity_column in blocks.columns:
+            blocks_df = (
+                blocks[["geometry", "population", capacity_column]]
+                .rename(columns={capacity_column: "capacity"})
+                .fillna(0)
+            )
         else:
-            blocks_df = blocks.rename(columns={capacity_column: "capacity"})[
-                ["geometry", "population", "capacity"]
-            ].fillna(0)
+            blocks_df = blocks[["geometry", "population"]].copy().fillna(0)
+            blocks_df["capacity"] = 0
         prov_df, _ = competitive_provision(blocks_df, acc_mx, accessibility, demand)
         prov_df = prov_df.loc[context_ids].copy()
         return blocks[["geometry"]].join(prov_df, how="right")
@@ -1002,5 +1005,72 @@ class EffectsService:
         )
         return result
 
+    async def _get_value_level(self, provisions: list[float | None]) -> float:
+        provisions = [p for p in provisions if p is not None]
+        return np.mean(provisions)
+
+
+    async def values_oriented_requirements(
+            self,
+            token: str,
+            params: ValuesDevelopmentDTO):
+
+        params = await self.get_optimal_func_zone_data(params, token)
+        project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
+        # project_info = await urban_api_gateway.get_all_project_info(project_id, token)
+
+        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
+        )
+
+        scenario_blocks, scenario_buildings = (
+            await self.aggregate_blocks_layer_scenario(
+                params.scenario_id,
+                params.proj_func_zone_source,
+                params.proj_func_source_year,
+                token,
+            )
+        )
+
+        scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
+        cap_cols = [c for c in scenario_blocks.columns if c.startswith('capacity_')]
+        scenario_blocks.loc[scenario_blocks['is_project'], ['population'] + cap_cols] = 0
+        if 'capacity' in scenario_blocks.columns:
+            scenario_blocks = scenario_blocks.drop(columns='capacity')
+
+        blocks = gpd.GeoDataFrame(
+            pd.concat([context_blocks, scenario_blocks], ignore_index=True),
+            crs=context_blocks.crs,
+        )
+
+        social_values_provisions = {}
+        provisions_gdfs = {}
+
+        service_types = await urban_api_gateway.get_service_types()
+        service_types = await adapt_service_types(service_types)
+        service_types = service_types[~service_types['social_values'].isna()].copy()
+
+        graph = get_accessibility_graph(blocks, "intermodal")
+        acc_mx = calculate_accessibility_matrix(blocks, graph)
+
+        for st_id in service_types.index:
+            st_name = service_types.loc[st_id, 'name']
+            social_values = service_types.loc[st_id, 'social_values']
+            prov_total, prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
+            provisions_gdfs[st_name] = prov_gdf
+            for social_value in social_values:
+                if social_value in social_values_provisions:
+                    social_values_provisions[social_value].append(prov_total)
+                else:
+                    social_values_provisions[social_value] = [prov_total]
+
+        index = social_values_provisions.keys()
+        columns = ['social_value_level']
+        result_df = pd.DataFrame(data=[self._get_value_level(social_values_provisions[sv_id]) for sv_id in index],
+                                 index=index, columns=columns)
+        return result_df
 
 effects_service = EffectsService()
