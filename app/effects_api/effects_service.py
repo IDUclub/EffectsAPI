@@ -1005,19 +1005,17 @@ class EffectsService:
         )
         return result
 
-    async def _get_value_level(self, provisions: list[float | None]) -> float:
-        provisions = [p for p in provisions if p is not None]
-        return np.mean(provisions)
-
+    def _get_value_level(self, provisions: list[float | None]) -> float:
+        vals = [p for p in provisions if p is not None]
+        return float(np.mean(vals)) if vals else np.nan
 
     async def values_oriented_requirements(
             self,
             token: str,
-            params: ValuesDevelopmentDTO):
-
+            params: ValuesDevelopmentDTO,
+    ):
         params = await self.get_optimal_func_zone_data(params, token)
         project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
-        # project_info = await urban_api_gateway.get_all_project_info(project_id, token)
 
         context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
             params.scenario_id,
@@ -1026,51 +1024,63 @@ class EffectsService:
             token,
         )
 
-        scenario_blocks, scenario_buildings = (
-            await self.aggregate_blocks_layer_scenario(
-                params.scenario_id,
-                params.proj_func_zone_source,
-                params.proj_func_source_year,
-                token,
-            )
+        scenario_blocks, scenario_buildings = await self.aggregate_blocks_layer_scenario(
+            params.scenario_id,
+            params.proj_func_zone_source,
+            params.proj_func_source_year,
+            token,
         )
 
         scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
-        cap_cols = [c for c in scenario_blocks.columns if c.startswith('capacity_')]
-        scenario_blocks.loc[scenario_blocks['is_project'], ['population'] + cap_cols] = 0
-        if 'capacity' in scenario_blocks.columns:
-            scenario_blocks = scenario_blocks.drop(columns='capacity')
+
+        cap_cols = [c for c in scenario_blocks.columns if c.startswith("capacity_")]
+        scenario_blocks.loc[
+            scenario_blocks["is_project"], ["population"] + cap_cols
+        ] = 0
+
+        if "capacity" in scenario_blocks.columns:
+            scenario_blocks = scenario_blocks.drop(columns="capacity")
 
         blocks = gpd.GeoDataFrame(
             pd.concat([context_blocks, scenario_blocks], ignore_index=True),
             crs=context_blocks.crs,
         )
 
-        social_values_provisions = {}
-        provisions_gdfs = {}
+        social_values_provisions: dict[str, list[float | None]] = {}
+        provisions_gdfs: dict[str, gpd.GeoDataFrame] = {}
 
         service_types = await urban_api_gateway.get_service_types()
         service_types = await adapt_service_types(service_types)
-        service_types = service_types[~service_types['social_values'].isna()].copy()
+        service_types = service_types[~service_types["social_values"].isna()].copy()
 
         graph = get_accessibility_graph(blocks, "intermodal")
         acc_mx = calculate_accessibility_matrix(blocks, graph)
 
         for st_id in service_types.index:
-            st_name = service_types.loc[st_id, 'name']
-            social_values = service_types.loc[st_id, 'social_values']
-            prov_total, prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
-            provisions_gdfs[st_name] = prov_gdf
-            for social_value in social_values:
-                if social_value in social_values_provisions:
-                    social_values_provisions[social_value].append(prov_total)
-                else:
-                    social_values_provisions[social_value] = [prov_total]
+            st_name = service_types.loc[st_id, "name"]
+            social_values = service_types.loc[st_id, "social_values"]
 
-        index = social_values_provisions.keys()
-        columns = ['social_value_level']
-        result_df = pd.DataFrame(data=[self._get_value_level(social_values_provisions[sv_id]) for sv_id in index],
-                                 index=index, columns=columns)
+            prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
+
+            if "provision_strong" in prov_gdf.columns:
+                prov_total: float | None = float(prov_gdf["provision_strong"].sum())
+            elif "provision" in prov_gdf.columns:
+                prov_total = float(prov_gdf["provision"].sum())
+            else:
+                prov_total = None
+
+            provisions_gdfs[st_name] = prov_gdf
+
+            for social_value in social_values:
+                social_values_provisions.setdefault(social_value, []).append(prov_total)
+
+        index = list(social_values_provisions.keys())
+        result_df = pd.DataFrame(
+            data=[self._get_value_level(social_values_provisions[sv_id]) for sv_id in index],
+            index=index,
+            columns=["social_value_level"],
+        )
         return result_df
+
 
 effects_service = EffectsService()

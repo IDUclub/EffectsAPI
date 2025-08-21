@@ -17,6 +17,8 @@ MethodFunc = Callable[[str, Any], "dict[str, Any]"]
 
 TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
+    "values_transformation": effects_service.values_transformation,
+    "values_oriented_requirements": effects_service.values_oriented_requirements,
 }
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()
