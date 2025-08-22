@@ -59,7 +59,6 @@ from .schemas.socio_economic_response_schema import (
 )
 
 
-# TODO add caching service
 class EffectsService:
 
     def __init__(
@@ -728,14 +727,6 @@ class EffectsService:
             prov_gdf = prov_gdf.drop(axis="columns", columns="provision_weak")
             prov_gdfs_before[st_name] = prov_gdf
 
-        # prov_totals = {}
-        # for st_name, prov_gdf in prov_gdfs_before.items():
-        #     if prov_gdf.demand.sum() == 0:
-        #         total = None
-        #     else:
-        #         total = float(provision_strong_total(prov_gdf))
-        #     prov_totals[st_name] = total
-
         existing_data = cached["data"] if cached else {}
         existing_data["before"] = {
             n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_before.items()
@@ -1014,7 +1005,23 @@ class EffectsService:
             token: str,
             params: ValuesDevelopmentDTO,
     ):
+        method_name = "values_oriented_requirements"
+
         params = await self.get_optimal_func_zone_data(params, token)
+
+        params_for_hash = await self.build_hash_params(params, token)
+        phash = cache.params_hash(params_for_hash)
+
+        info = await urban_api_gateway.get_scenario_info(params.scenario_id, token)
+        updated_at = info["updated_at"]
+
+        cached = cache.load(method_name, params.scenario_id, phash)
+        if cached and cached["meta"].get("scenario_updated_at") == updated_at and "result" in cached["data"]:
+            payload = cached["data"]["result"]
+            result_df = pd.DataFrame(data=payload["data"], index=payload["index"], columns=payload["columns"])
+            result_df.index.name = payload.get("index_name", None)
+            return result_df
+
         project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
 
         context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
@@ -1080,6 +1087,22 @@ class EffectsService:
             index=index,
             columns=["social_value_level"],
         )
+        result_df.index.name = "social_value_id"
+
+        payload = {
+            "columns": result_df.columns.tolist(),
+            "index": result_df.index.tolist(),
+            "data": result_df.values.tolist(),
+            "index_name": result_df.index.name,
+        }
+        cache.save(
+            method_name,
+            params.scenario_id,
+            params_for_hash,
+            {"result": payload},
+            scenario_updated_at=updated_at,
+        )
+
         return result_df
 
 

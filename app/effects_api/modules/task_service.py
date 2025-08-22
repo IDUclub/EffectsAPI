@@ -26,13 +26,13 @@ _task_map: dict[str, "AnyTask"] = {}
 
 
 class AnyTask:
-    def __init__(self, method: str, scenario_id: int, token: str, params: Any):
+    def __init__(self, method: str, scenario_id: int, token: str, params: Any, params_hash: str):
         self.method = method
         self.scenario_id = scenario_id
         self.token = token
         self.params = params
+        self.param_hash = params_hash
 
-        self.param_hash = cache.params_hash(params.model_dump())
         self.task_id = f"{method}_{scenario_id}_{self.param_hash}"
         self.status: Literal["queued", "running", "done", "failed"] = "queued"
         self.result: dict | None = None
@@ -80,6 +80,17 @@ class AnyTask:
             logger.exception(exc)
             self.status = "failed"
             self.error = str(exc)
+
+
+async def create_task(method: str, token: str, params) -> str:
+    norm_params = await effects_service.get_optimal_func_zone_data(params, token)
+    params_for_hash = await effects_service.build_hash_params(norm_params, token)
+    phash = cache.params_hash(params_for_hash)
+
+    task = AnyTask(method, norm_params.scenario_id, token, norm_params, phash)
+    _task_map[task.task_id] = task
+    await _task_queue.put(task)
+    return task.task_id
 
 
 async def _worker():
