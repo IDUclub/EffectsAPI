@@ -232,7 +232,7 @@ class EffectsService:
         scenario_id: int, token: str
     ) -> tuple[gpd.GeoDataFrame, int]:
         project_id = await urban_api_gateway.get_project_id(scenario_id, token)
-        blocks = await get_context_blocks(project_id, scenario_id)
+        blocks = await get_context_blocks(project_id, scenario_id, token)
         blocks["site_area"] = blocks.area
         return blocks, project_id
 
@@ -251,10 +251,10 @@ class EffectsService:
 
     @staticmethod
     async def enrich_with_context_buildings(
-        blocks: gpd.GeoDataFrame, scenario_id: int
+        blocks: gpd.GeoDataFrame, scenario_id: int,  token: str
     ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
 
-        buildings = await get_context_buildings(scenario_id)
+        buildings = await get_context_buildings(scenario_id, token)
         if buildings is None:
             blocks["count_buildings"] = 0
             blocks["is_living"] = None
@@ -279,7 +279,7 @@ class EffectsService:
 
         stypes = await urban_api_gateway.get_service_types()
         stypes = await adapt_service_types(stypes)
-        sdict = await get_context_services(scenario_id, stypes)
+        sdict = await get_context_services(scenario_id, stypes, token)
 
         for stype, services in sdict.items():
             services = services.to_crs(blocks.crs)
@@ -315,7 +315,7 @@ class EffectsService:
         )
 
         logger.info("Aggregating buildings for context")
-        blocks, buildings = await self.enrich_with_context_buildings(blocks, scenario_id)
+        blocks, buildings = await self.enrich_with_context_buildings(blocks, scenario_id, token)
 
         logger.info("Aggregating services for context")
         blocks = await self.enrich_with_context_services(blocks, scenario_id, token)
@@ -988,8 +988,8 @@ class EffectsService:
 
         solution_df = facade.solution_to_services_df(best_x)
 
-        if params.required_service:
-            solution_df = solution_df.loc[solution_df["service_type"] == params.required_service]
+        # if params.required_service:
+        #     solution_df = solution_df.loc[solution_df["service_type"] == params.required_service]
 
         result = json.loads(
             solution_df.to_json(orient="records", date_format="iso")

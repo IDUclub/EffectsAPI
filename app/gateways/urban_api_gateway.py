@@ -18,20 +18,27 @@ class UrbanAPIGateway:
 
     # TODO context
     async def get_physical_objects(
-        self, scenario_id: int, **kwargs: dict
+        self,
+        scenario_id: int,
+        token: str,
+        **params: Any,
     ) -> gpd.GeoDataFrame:
+        headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
-            params=kwargs,
+            headers=headers,
+            params=params,
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
             "physical_object_id"
         )
 
-    async def get_services(self, scenario_id: int, **kwargs: Any) -> gpd.GeoDataFrame:
+    async def get_services(self, scenario_id: int, token, **kwargs: Any) -> gpd.GeoDataFrame:
+        headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/services_with_geometry",
+            headers=headers,
             params=kwargs,
         )
         features = res["features"]
@@ -39,18 +46,22 @@ class UrbanAPIGateway:
             "service_id"
         )
 
-    async def get_functional_zones_sources(self, scenario_id: int) -> pd.DataFrame:
+    async def get_functional_zones_sources(self, scenario_id: int, token: str) -> pd.DataFrame:
+        headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
-            f"/api/v1/scenarios/{scenario_id}/context/functional_zone_sources"
+            f"/api/v1/scenarios/{scenario_id}/context/functional_zone_sources",
+            headers=headers,
         )
         return pd.DataFrame(res)
 
     async def get_functional_zones(
-        self, scenario_id: int, year: int, source: int
+        self, scenario_id: int, year: int, source: int, token: str
     ) -> gpd.GeoDataFrame:
+        headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/functional_zones",
             params={"year": year, "source": source},
+            headers=headers,
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
