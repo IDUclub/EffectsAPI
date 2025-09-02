@@ -49,9 +49,10 @@ def close_gaps(gdf, tolerance):  # taken from momepy
     return gpd.GeoSeries(snapped, crs=gdf.crs)
 
 
-async def _get_project_boundaries(project_id: int):
+async def _get_project_boundaries(project_id: int, token: str):
     return gpd.GeoDataFrame(
-        geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326
+        geometry=[await urban_api_gateway.get_project_geometry(project_id, token)],
+        crs=4326,
     )
 
 
@@ -111,7 +112,7 @@ async def _get_scenario_blocks(
 async def _get_scenario_info(scenario_id: int, token: str) -> tuple[int, int]:
     scenario = await urban_api_gateway.get_scenario(scenario_id, token)
     project_id = scenario["project"]["project_id"]
-    project = await urban_api_gateway.get_project(project_id)
+    project = await urban_api_gateway.get_project(project_id, token)
     base_scenario_id = project["base_scenario"]["id"]
     return project_id, base_scenario_id
 
@@ -158,7 +159,7 @@ async def _get_best_functional_zones_source(
 
 async def get_scenario_blocks(user_scenario_id: int, token: str) -> gpd.GeoDataFrame:
     project_id, base_scenario_id = await _get_scenario_info(user_scenario_id, token)
-    project_boundaries = await _get_project_boundaries(project_id)
+    project_boundaries = await _get_project_boundaries(project_id, token)
 
     crs = project_boundaries.estimate_utm_crs()
     project_boundaries = project_boundaries.to_crs(crs)

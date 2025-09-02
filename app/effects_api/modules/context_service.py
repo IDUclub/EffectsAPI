@@ -13,19 +13,18 @@ from app.effects_api.modules.scenario_service import (
 )
 from app.effects_api.modules.services_service import adapt_services
 
-# from blocksnet.relations import get_accessibility_context
-# from blocksnet.config import service_types_config
-# from blocksnet.analysis.provision import competitive_provision
 
-
-async def _get_project_boundaries(project_id: int):
+async def _get_project_boundaries(project_id: int, token: str):
     return gpd.GeoDataFrame(
-        geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326
+        geometry=[
+            await urban_api_gateway.get_project_geometry(project_id, token=token)
+        ],
+        crs=4326,
     )
 
 
-async def _get_context_boundaries(project_id: int) -> gpd.GeoDataFrame:
-    project = await urban_api_gateway.get_project(project_id)
+async def _get_context_boundaries(project_id: int, token: str) -> gpd.GeoDataFrame:
+    project = await urban_api_gateway.get_project(project_id, token)
     context_ids = project["properties"]["context"]
     geometries = [
         await urban_api_gateway.get_territory_geometry(territory_id)
@@ -107,36 +106,3 @@ async def get_context_services(scenario_id: int, service_types: pd.DataFrame):
     gdf = gdf.to_crs(gdf.estimate_utm_crs())
     gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
     return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
-
-
-# async def _assess_provision(
-#         blocks: pd.DataFrame, acc_mx: pd.DataFrame, service_type: str
-# ) -> gpd.GeoDataFrame:
-#     _, demand, accessibility = service_types_config[service_type].values()
-#     blocks["is_project"] = (
-#         blocks["is_project"]
-#         .fillna(False)
-#         .astype(bool)
-#     )
-#     context_ids = await _get_accessibility_context(blocks, acc_mx, accessibility)
-#     capacity_column = f"capacity_{service_type}"
-#     if capacity_column not in blocks.columns:
-#         blocks_df = blocks[["geometry", "population"]].fillna(0)
-#         blocks_df["capacity"] = 0
-#     else:
-#         blocks_df = blocks.rename(columns={capacity_column: "capacity"})[
-#             ["geometry", "population", "capacity"]
-#         ].fillna(0)
-#     prov_df, _ = competitive_provision(blocks_df, acc_mx, accessibility, demand)
-#     prov_df = prov_df.loc[context_ids].copy()
-#     return blocks[["geometry"]].join(prov_df, how="right")
-#
-# async def _get_accessibility_context(
-#     blocks: pd.DataFrame, acc_mx: pd.DataFrame, accessibility: float
-# ) -> list[int]:
-#     blocks["population"] = blocks["population"].fillna(0)
-#     project_blocks = blocks[blocks["is_project"]].copy()
-#     context_blocks = get_accessibility_context(
-#         acc_mx, project_blocks, accessibility, out=False, keep=True
-#     )
-#     return list(context_blocks.index)

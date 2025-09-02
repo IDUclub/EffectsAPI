@@ -38,7 +38,7 @@ class SocioEconomicSchema(BaseModel):
             return {
                 (
                     k
-                    if k not in pred_columns_names_map.keys()
+                    if k not in soc_economy_pred_name_map.keys()
                     else soc_economy_pred_name_map[k]
                 ): v
                 for k, v in value.items()
