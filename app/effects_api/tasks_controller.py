@@ -25,6 +25,10 @@ async def _with_defaults(
 ) -> ContextDevelopmentDTO:
     return await effects_service.get_optimal_func_zone_data(dto, token)
 
+@router.get("/methods")
+async def get_methods():
+    """router for getting method names available for tasks creation"""
+    return list(TASK_METHODS.keys())
 
 @router.post("/{method}", status_code=202)
 async def create_task(
