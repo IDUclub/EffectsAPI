@@ -23,7 +23,6 @@ class UrbanAPIGateway:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
             params=kwargs,
-            headers={"Authorization": f"Bearer {token}"},
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
@@ -34,7 +33,6 @@ class UrbanAPIGateway:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/services_with_geometry",
             params=kwargs,
-            headers={"Authorization": f"Bearer {token}"},
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
@@ -53,7 +51,6 @@ class UrbanAPIGateway:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/functional_zones",
             params={"year": year, "source": source},
-            headers={"Authorization": f"Bearer {token}"},
         )
         features = res["features"]
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(

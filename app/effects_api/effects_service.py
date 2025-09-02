@@ -39,7 +39,7 @@ from .dto.values_development_dto import ValuesDevelopmentDTO
 
 from ..common.caching.caching_service import cache
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import _fc_to_gdf, _gdf_to_ru_fc
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc
 from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -187,7 +187,6 @@ class EffectsService:
             b_srv, _ = aggregate_objects(blocks, services)
             b_srv[["capacity", "count"]] = (
                 b_srv[["capacity", "count"]].fillna(0).astype(int)
-
             )
             blocks = blocks.join(
                 b_srv.drop(columns=["geometry"]).rename(
@@ -482,7 +481,7 @@ class EffectsService:
         4. Feed summarised indicators into SocialRegressor.
         """
 
-        logger.info(f"Evaluating master plan effects with {params.model_dump()}")
+        logger.info("Evaluating master plan effects")
         params = await self.get_optimal_func_zone_data(params, token)
         project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
         project_info = await urban_api_gateway.get_all_project_info(project_id, token)
@@ -544,7 +543,9 @@ class EffectsService:
                     crs=4326,
                 )
                 ter_blocks = (
-                    blocks.sjoin(territory.to_crs(blocks.crs), how="left")
+                    blocks.sjoin(
+                        territory.to_crs(territory.estimate_utm_crs()), how="left"
+                    )
                     .dropna(subset="index_right")
                     .drop(columns="index_right")
                 )
@@ -556,9 +557,6 @@ class EffectsService:
                     ter_blocks, ter_input
                 )
 
-        logger.info(
-            f"Finished evaluating master plan effects with {params.model_dump()}"
-        )
         return SocioEconomicResponseSchema(
             socio_economic_prediction=main_res.socio_economic_prediction,
             split_prediction=context_results if context_results else None,
@@ -577,7 +575,6 @@ class EffectsService:
             DevelopmentResponseSchema: Response schema with development indicators
         """
 
-        logger.info(f"Calculating development for project {params.model_dump()}")
         params = await self.get_optimal_func_zone_data(params, token)
         blocks, buildings = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,
@@ -588,9 +585,6 @@ class EffectsService:
         res = await self.run_development_parameters(blocks)
         res = res.to_dict(orient="list")
         res.update({"params_data": params.model_dump()})
-        logger.info(
-            f"Finished calculating development for project {params.model_dump()}"
-        )
         return DevelopmentResponseSchema(**res)
 
     async def calc_context_development(
@@ -605,7 +599,6 @@ class EffectsService:
             DevelopmentResponseSchema: Response schema with development indicators
         """
 
-        logger.info(f"Calculating development for context {params.model_dump()}")
         params = await self.get_optimal_func_zone_data(params, token)
         context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
             params.scenario_id,
@@ -625,9 +618,6 @@ class EffectsService:
         res = await self.run_development_parameters(blocks)
         res = res.to_dict(orient="list")
         res.update({"params_data": params.model_dump()})
-        logger.info(
-            f"Finished calculating development for context {params.model_dump()}"
-        )
         return DevelopmentResponseSchema(**res)
 
     async def _get_accessibility_context(
@@ -692,7 +682,7 @@ class EffectsService:
             and cached["meta"]["scenario_updated_at"] == updated_at
             and "before" in cached["data"]
         ):
-            return {n: _fc_to_gdf(fc) for n, fc in cached["data"]["before"].items()}
+            return {n: fc_to_gdf(fc) for n, fc in cached["data"]["before"].items()}
 
         logger.info("Cache stale or missing: recalculating BEFORE")
 
@@ -739,7 +729,7 @@ class EffectsService:
 
         existing_data = cached["data"] if cached else {}
         existing_data["before"] = {
-            n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_before.items()
+            n: gdf_to_ru_fc(g) for n, g in prov_gdfs_before.items()
         }
 
         cache.save(
@@ -892,7 +882,7 @@ class EffectsService:
                 )
 
         from_cache = cached["data"] if cached else {}
-        from_cache["after"] = {n: _gdf_to_ru_fc(g) for n, g in prov_gdfs_after.items()}
+        from_cache["after"] = {n: gdf_to_ru_fc(g) for n, g in prov_gdfs_after.items()}
         from_cache["opt_context"] = {
             "best_x": best_x,
         }
@@ -1015,6 +1005,7 @@ class EffectsService:
             token: str,
             params: ValuesDevelopmentDTO,
     ):
+        service_type = params.service_type
         method_name = "values_oriented_requirements"
 
         params = await self.get_optimal_func_zone_data(params, token)
@@ -1112,6 +1103,7 @@ class EffectsService:
             {"result": payload},
             scenario_updated_at=updated_at,
         )
+
 
         return result_df
 

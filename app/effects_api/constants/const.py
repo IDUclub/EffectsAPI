@@ -110,9 +110,10 @@ BUILDINGS_RULES = {
     "population": [["properties", "population_balanced"]],
 }
 
-
+#For each Infrastructure_type we will also add a weighting factor to give preference to the basic service, and another switch for capabilities.
 INFRASTRUCTURES_WEIGHTS = {"basic": 0.5714, "additional": 0.2857, "comfort": 0.1429}
 
+#Mapping for translation of english provision properties
 COL_RU = {
     "demand": "Спрос",
     "capacity": "Емкость сервисов",
@@ -124,7 +125,11 @@ COL_RU = {
     "capacity_without": "Емкость сервисов за пределами нормативной доступности",
     "provision_strong": "Обеспеченность сервисами",
 }
-
+#ID of living building physical_object_type_id
 LIVING_BUILDINGS_ID = 4
+
+#ID of road physical_object_function_id
 ROADS_ID = 26
+
+#ID of water objects physical_object_function_id
 WATER_ID = 4

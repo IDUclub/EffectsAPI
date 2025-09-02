@@ -103,15 +103,33 @@ async def _worker():
 worker_task: asyncio.Task | None = None
 
 
-def init_worker(app: FastAPI):
-    global worker_task
-    worker_task = asyncio.create_task(_worker(), name="any_task_worker")
+class Worker:
+    def __init__(self):
+        self.is_alive = True
+        self.task: asyncio.Task | None = None
 
+    async def run(self):
+        while self.is_alive:
+            task: AnyTask = await _task_queue.get()
+            await asyncio.to_thread(task.run_sync)
+            _task_queue.task_done()
+
+    def start(self):
+        self.task = asyncio.create_task(self.run(), name="any_task_worker")
+
+    async def stop(self):
+        self.is_alive = False
+        if self.task:
+            self.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.task
+
+worker = Worker()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    if worker_task:
-        worker_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await worker_task
+    worker.start()
+    try:
+        yield
+    finally:
+        await worker.stop()

@@ -14,17 +14,14 @@ from app.effects_api.modules.scenario_service import (
 from app.effects_api.modules.services_service import adapt_services
 
 
-async def _get_project_boundaries(project_id: int, token: str):
+async def _get_project_boundaries(project_id: int):
     return gpd.GeoDataFrame(
-        geometry=[
-            await urban_api_gateway.get_project_geometry(project_id, token=token)
-        ],
-        crs=4326,
+        geometry=[await urban_api_gateway.get_project_geometry(project_id)], crs=4326
     )
 
 
-async def _get_context_boundaries(project_id: int, token: str) -> gpd.GeoDataFrame:
-    project = await urban_api_gateway.get_project(project_id, token)
+async def _get_context_boundaries(project_id: int) -> gpd.GeoDataFrame:
+    project = await urban_api_gateway.get_project(project_id)
     context_ids = project["properties"]["context"]
     geometries = [
         await urban_api_gateway.get_territory_geometry(territory_id)
