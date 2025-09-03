@@ -35,7 +35,7 @@ from app.effects_api.modules.scenario_service import (
     get_scenario_services,
 )
 from app.effects_api.modules.service_type_service import adapt_service_types
-from .dto.values_development_dto import ValuesDevelopmentDTO
+from .dto.transformation_effects_dto import TerritoryTransformationDTO
 
 from ..common.caching.caching_service import cache
 from ..common.exceptions.http_exception_wrapper import http_exception
@@ -88,7 +88,7 @@ class EffectsService:
 
     @staticmethod
     async def get_optimal_func_zone_data(
-        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO | ValuesDevelopmentDTO,
+        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO | TerritoryTransformationDTO,
         token: str,
     ) -> DevelopmentDTO:
         """
@@ -932,7 +932,7 @@ class EffectsService:
     async def values_transformation(
             self,
             token: str,
-            params: ValuesDevelopmentDTO,
+            params: TerritoryTransformationDTO,
     ) -> pd.DataFrame:
 
         method_name = "territory_transformation"
@@ -1003,7 +1003,7 @@ class EffectsService:
     async def values_oriented_requirements(
             self,
             token: str,
-            params: ValuesDevelopmentDTO,
+            params: TerritoryTransformationDTO,
     ):
         service_type = params.service_type
         method_name = "values_oriented_requirements"

@@ -13,7 +13,6 @@ from .dto.development_dto import (
     SocioEconomicPredictionDTO,
 )
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
-from .dto.values_development_dto import ValuesDevelopmentDTO
 from .effects_service import effects_service
 from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
@@ -64,14 +63,14 @@ async def territory_transformation(
 
 @development_router.get("/values_development")
 async def values_development(
-    params: Annotated[ValuesDevelopmentDTO, Depends(ValuesDevelopmentDTO)],
+    params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
     token: str = Depends(verify_token)
 ):
     return await effects_service.values_transformation(token, params)
 
 @development_router.get("/values_oriented_requirements")
 async def values_requirements(
-        params: Annotated[ValuesDevelopmentDTO, Depends(ValuesDevelopmentDTO)],
+        params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
         token: str = Depends(verify_token)
 ):
     return await effects_service.values_oriented_requirements(token, params)
