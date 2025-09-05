@@ -4,6 +4,7 @@ from typing import List, Optional
 import pandas as pd
 from blocksnet.config import service_types_config
 
+from app.common.caching.caching_service import cache
 from app.dependencies import urban_api_gateway
 from app.effects_api.constants.const import SERVICE_TYPES_MAPPING
 
@@ -46,3 +47,32 @@ async def adapt_service_types(service_types_df: pd.DataFrame) -> pd.DataFrame:
     df["social_values"] = social_vals
 
     return df[["name", "infrastructure_type", "infrastructure_weight", "social_values"]]
+
+async def get_services_with_ids_from_layer(scenario_id: int, method: str) -> dict:
+    cached: Optional[dict] = cache.load_latest(method, scenario_id)
+    if not cached or "data" not in cached:
+        return {"before": [], "after": []}
+
+    data = cached["data"]
+
+    def map_services(names):
+        result = []
+        for name in names:
+            matched = [
+                {"id": sid, "name": sname}
+                for sid, sname in SERVICE_TYPES_MAPPING.items()
+                if sname == name
+            ]
+            if matched:
+                result.extend(matched)
+            else:
+                result.append({"id": None, "name": name})
+        return result
+
+    before_names = list(data.get("before", {}).keys())
+    after_names = list(data.get("after", {}).keys())
+
+    return {
+        "before": map_services(before_names),
+        "after": map_services(after_names),
+    }

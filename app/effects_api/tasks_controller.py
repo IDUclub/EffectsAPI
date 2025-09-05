@@ -11,6 +11,7 @@ from app.effects_api.modules.task_service import (
     _task_map,
     _task_queue,
 )
+from .modules.service_type_service import get_services_with_ids_from_layer
 
 from ..common.caching.caching_service import cache
 from ..common.exceptions.http_exception_wrapper import http_exception
@@ -60,13 +61,19 @@ async def create_task(
     return {"task_id": task_id, "status": "queued"}
 
 
-@router.get("/{task_id}")
+@router.get("/status/{task_id}")
 async def task_status(task_id: str):
     task = _task_map.get(task_id)
     if not task:
         raise http_exception(404, "task not found", task_id)
     return await task.to_response()
 
+@router.get("/get_service_types")
+async def get_service_types(
+    scenario_id: int,
+    method: str = "territory_transformation",
+):
+    return await get_services_with_ids_from_layer(scenario_id, method)
 
 @router.get("/territory_transformation/{scenario_id}/{service_name}")
 async def get_territory_transformation_layer(scenario_id: int, service_name: str):
