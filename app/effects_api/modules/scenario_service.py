@@ -49,10 +49,9 @@ def close_gaps(gdf, tolerance):  # taken from momepy
     return gpd.GeoSeries(snapped, crs=gdf.crs)
 
 
-async def _get_project_boundaries(project_id: int, token: str):
+async def _get_project_boundaries(project_id: int, token):
     return gpd.GeoDataFrame(
-        geometry=[await urban_api_gateway.get_project_geometry(project_id, token)],
-        crs=4326,
+        geometry=[await urban_api_gateway.get_project_geometry(project_id, token)], crs=4326
     )
 
 
