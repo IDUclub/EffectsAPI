@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, List
 
 import geopandas as gpd
 import pandas as pd
@@ -382,3 +382,11 @@ class UrbanAPIGateway:
             raise http_exception(404, "base scenario not found", project_id)
 
         return base["scenario_id"]
+
+    async def get_project_scenarios(self, project_id: int, token: Optional[str] = None) -> List[Dict[str, Any]]:
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        res = await self.json_handler.get(
+            f"/api/v1/projects/{project_id}/scenarios",
+            headers=headers,
+        )
+        return res

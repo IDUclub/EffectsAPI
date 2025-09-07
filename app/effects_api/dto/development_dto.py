@@ -40,7 +40,27 @@ class ContextDevelopmentDTO(DevelopmentDTO):
     )
 
 
-class SocioEconomicPredictionDTO(ContextDevelopmentDTO):
+class SocioEconomicByScenarioDTO(ContextDevelopmentDTO):
+
+    split: bool = Field(
+        default=False,
+        examples=[False, True],
+        description="If split will return additional evaluation for each context mo",
+    )
+
+
+class SocioEconomicByProjectDTO(BaseModel):
+    project_id: int = Field(
+        ...,
+        examples=[120],
+        description="Project ID to retrieve data from.",
+    )
+
+    regional_scenario_id: int = Field(
+        ...,
+        examples=[122],
+        description="Regional scenario ID using for filtering.",
+    )
 
     split: bool = Field(
         default=False,

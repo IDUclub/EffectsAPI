@@ -10,7 +10,8 @@ from app.common.auth.auth import verify_token
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
-    SocioEconomicPredictionDTO,
+    SocioEconomicByProjectDTO,
+    SocioEconomicByScenarioDTO
 )
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .effects_service import effects_service
@@ -41,13 +42,22 @@ async def get_context_development(
 
 
 @development_router.get(
-    "/socio_economic_prediction", response_model=SocioEconomicResponseSchema
+    "/project_socio_economic_prediction", response_model=SocioEconomicResponseSchema
 )
 async def get_socio_economic_prediction(
-    params: Annotated[SocioEconomicPredictionDTO, Depends(SocioEconomicPredictionDTO)],
+    params: Annotated[SocioEconomicByProjectDTO, Depends(SocioEconomicByProjectDTO)],
     token: str = Depends(verify_token),
 ) -> SocioEconomicResponseSchema:
-    return await effects_service.evaluate_master_plan(params, token)
+    return await effects_service.evaluate_master_plan_by_project(params, token)
+
+@development_router.get(
+    "/scenario_socio_economic_prediction", response_model=SocioEconomicResponseSchema
+)
+async def get_socio_economic_prediction(
+    params: Annotated[SocioEconomicByScenarioDTO, Depends(SocioEconomicByScenarioDTO)],
+    token: str = Depends(verify_token),
+) -> SocioEconomicResponseSchema:
+    return await effects_service.evaluate_master_plan_by_scenario(params, token)
 
 
 @development_router.get("/territory_transformation")

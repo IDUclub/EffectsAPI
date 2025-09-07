@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Dict, Optional
 
 import geopandas as gpd
 import numpy as np
@@ -44,7 +44,7 @@ from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
-    SocioEconomicPredictionDTO,
+    SocioEconomicByProjectDTO, SocioEconomicByScenarioDTO,
 )
 from .modules.context_service import (
     get_context_blocks,
@@ -88,7 +88,7 @@ class EffectsService:
 
     @staticmethod
     async def get_optimal_func_zone_data(
-        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicPredictionDTO | TerritoryTransformationDTO,
+        params: DevelopmentDTO | ContextDevelopmentDTO | SocioEconomicByProjectDTO | TerritoryTransformationDTO,
         token: str,
     ) -> DevelopmentDTO:
         """
@@ -449,117 +449,133 @@ class EffectsService:
         res = result_df.to_dict(orient="index")
         return SocioEconomicSchema(socio_economic_prediction=res)
 
-    async def evaluate_master_plan(
-        self, params: SocioEconomicPredictionDTO, token: str = None
-    ) -> SocioEconomicSchema:
-        """
-        End-to-end pipeline that fuses *project* and *context* blocks, enriches
-        them with development parameters and produces socio-economic forecasts
-        via ``SocialRegressor``.
+    async def evaluate_master_plan_by_project(
+            self, params: SocioEconomicByProjectDTO, token: Optional[str] = None
+    ) -> SocioEconomicResponseSchema:
+        project_id = params.project_id
+        regional_sid = params.regional_scenario_id
+        logger.info(f"[Effects] project mode: project_id={project_id}, regional_scenario_id={regional_sid}")
 
-        Params:
-        params (ContextDevelopmentDTO): dto class containing following parameters:
-            scenario_id : int
-                Scenario to evaluate.
-            functional_zone_source, functional_zone_year : str | int | None
-                Source and year for **project** functional zones.
-            context_functional_zone_source, context_functional_zone_year : str | int | None
-                Source and year for **context** functional zones.
-        token : str | None, default None
-            Optional bearer token for Urban API.
-
-        Returns:
-        SocioEconomicResponseSchema:
-            pd.DataFrame.to_dict(orient="index") representation as schema with additional params keys:
-            `pred`, `lower`, `upper`, `is_interval`
-            – predicted socio-economic indicator and its prediction interval.
-
-        Workflow:
-        1. Aggregate context blocks and project blocks.
-        2. Merge them, clip land-use shares to 1.
-        3. Compute development parameters (`run_development_parameters`).
-        4. Feed summarised indicators into SocialRegressor.
-        """
-
-        logger.info("Evaluating master plan effects")
-        params = await self.get_optimal_func_zone_data(params, token)
-        project_id = await urban_api_gateway.get_project_id(params.scenario_id, token)
         project_info = await urban_api_gateway.get_all_project_info(project_id, token)
-        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
+        context_territories = project_info.get("properties", {}).get("context") or []
+
+        base_sid = await urban_api_gateway.get_base_scenario_id(project_id)
+        ctx_src, ctx_year = await urban_api_gateway.get_optimal_func_zone_request_data(
+            token=token, data_id=base_sid, source=None, year=None, project=False
         )
+        context_blocks, _ = await self.aggregate_blocks_layer_context(base_sid, ctx_src, ctx_year, token)
 
-        scenario_blocks, scenario_buildings = (
-            await self.aggregate_blocks_layer_scenario(
-                params.scenario_id,
-                params.proj_func_zone_source,
-                params.proj_func_source_year,
-                token,
-            )
-        )
-
-        scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
-
-        blocks = gpd.GeoDataFrame(
-            pd.concat([context_blocks, scenario_blocks], ignore_index=True),
-            crs=context_blocks.crs,
-        )
-        cols = [
-            "residential",
-            "business",
-            "recreation",
-            "industrial",
-            "transport",
-            "special",
-            "agriculture",
-        ]
-
-        blocks[cols] = blocks[cols].clip(upper=1)
-        development_df = await self.run_development_parameters(blocks)
-
-        cols = [
-            "build_floor_area",
-            "footprint_area",
-            "living_area",
-            "non_living_area",
-            "population",
-        ]
-        blocks[cols] = development_df[cols].values
-        for lu in LandUse:
-            blocks[lu.value] = blocks[lu.value] * blocks["site_area"]
-        main_data = [blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
-        main_input = pd.DataFrame(main_data)
-        main_res = await self.run_social_reg_prediction(blocks, main_input)
-        context_results = {}
-        if params.split:
-            for context_ter_id in project_info["properties"]["context"]:
+        context_split: Optional[Dict[int, SocioEconomicSchema]] = None
+        if params.split and context_territories:
+            context_split = {}
+            for tid in context_territories:
                 territory = gpd.GeoDataFrame(
-                    geometry=[
-                        await urban_api_gateway.get_territory_geometry(context_ter_id)
-                    ],
-                    crs=4326,
+                    geometry=[await urban_api_gateway.get_territory_geometry(tid)], crs=4326
                 )
                 ter_blocks = (
-                    blocks.sjoin(
-                        territory.to_crs(territory.estimate_utm_crs()), how="left"
-                    )
-                    .dropna(subset="index_right")
-                    .drop(columns="index_right")
+                    context_blocks.sjoin(territory.to_crs(territory.estimate_utm_crs()), how="left")
+                    .dropna(subset="index_right").drop(columns="index_right")
                 )
-                ter_data = [
-                    ter_blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()
-                ]
+                ter_data = [ter_blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
                 ter_input = pd.DataFrame(ter_data)
-                context_results[context_ter_id] = await self.run_social_reg_prediction(
-                    ter_blocks, ter_input
-                )
+                context_split[tid] = await self.run_social_reg_prediction(ter_blocks, ter_input)
+
+        scenarios = await urban_api_gateway.get_project_scenarios(project_id, token)
+        target = [s for s in scenarios if (s.get("parent_scenario") or {}).get("id") == regional_sid]
+        logger.info(f"[Effects] matched {len(target)} scenarios in project {project_id} (parent={regional_sid})")
+
+        landuse_cols = ["residential", "business", "recreation", "industrial", "transport", "special", "agriculture"]
+        results_by_scenario: Dict[int, Dict[str, Any]] = {}
+
+        for s in target:
+            sid = s["scenario_id"]
+            proj_src, proj_year = await urban_api_gateway.get_optimal_func_zone_request_data(
+                token=token, data_id=sid, source=None, year=None, project=True
+            )
+            scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(sid, proj_src, proj_year, token)
+            scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
+
+            blocks = gpd.GeoDataFrame(pd.concat([context_blocks, scenario_blocks], ignore_index=True),
+                                      crs=context_blocks.crs)
+            blocks[landuse_cols] = blocks[landuse_cols].clip(upper=1)
+            development_df = await self.run_development_parameters(blocks)
+
+            add_cols = ["build_floor_area", "footprint_area", "living_area", "non_living_area", "population"]
+            blocks[add_cols] = development_df[add_cols].values
+
+            for lu in LandUse:
+                blocks[lu.value] = blocks[lu.value] * blocks["site_area"]
+
+            main_data = [blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
+            main_input = pd.DataFrame(main_data)
+            main_res: SocioEconomicSchema = await self.run_social_reg_prediction(blocks, main_input)
+
+            results_by_scenario[sid] = main_res.socio_economic_prediction
 
         return SocioEconomicResponseSchema(
-            socio_economic_prediction=main_res.socio_economic_prediction,
-            split_prediction=context_results if context_results else None,
+            socio_economic_prediction=results_by_scenario,
+            split_prediction=context_split or None,
+            params_data=params,
+        )
+
+    async def evaluate_master_plan_by_scenario(
+            self, params: SocioEconomicByScenarioDTO, token: Optional[str] = None
+    ) -> SocioEconomicResponseSchema:
+        sid = params.scenario_id
+        logger.info(f"[Effects] legacy mode: scenario_id={sid}")
+
+        project_id = await urban_api_gateway.get_project_id(sid, token)
+        project_info = await urban_api_gateway.get_all_project_info(project_id, token)
+        context_territories = project_info.get("properties", {}).get("context") or []
+
+        ctx_src, ctx_year = await urban_api_gateway.get_optimal_func_zone_request_data(
+            token=token, data_id=sid, source=params.context_func_zone_source, year=params.context_func_source_year,
+            project=False
+        )
+        proj_src, proj_year = await urban_api_gateway.get_optimal_func_zone_request_data(
+            token=token, data_id=sid, source=params.proj_func_zone_source, year=params.proj_func_source_year,
+            project=True
+        )
+
+        context_blocks, _ = await self.aggregate_blocks_layer_context(sid, ctx_src, ctx_year, token)
+        scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(sid, proj_src, proj_year, token)
+        scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
+
+        blocks = gpd.GeoDataFrame(pd.concat([context_blocks, scenario_blocks], ignore_index=True),
+                                  crs=context_blocks.crs)
+
+        landuse_cols = ["residential", "business", "recreation", "industrial", "transport", "special", "agriculture"]
+        blocks[landuse_cols] = blocks[landuse_cols].clip(upper=1)
+        development_df = await self.run_development_parameters(blocks)
+
+        add_cols = ["build_floor_area", "footprint_area", "living_area", "non_living_area", "population"]
+        blocks[add_cols] = development_df[add_cols].values
+
+        for lu in LandUse:
+            blocks[lu.value] = blocks[lu.value] * blocks["site_area"]
+
+        main_data = [blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
+        main_input = pd.DataFrame(main_data)
+        main_res: SocioEconomicSchema = await self.run_social_reg_prediction(blocks, main_input)
+
+        split_results: Optional[Dict[int, SocioEconomicSchema]] = None
+        if params.split and context_territories:
+            split_results = {}
+            for tid in context_territories:
+                territory = gpd.GeoDataFrame(
+                    geometry=[await urban_api_gateway.get_territory_geometry(tid)], crs=4326
+                )
+                ter_blocks = (
+                    blocks.sjoin(territory.to_crs(territory.estimate_utm_crs()), how="left")
+                    .dropna(subset="index_right").drop(columns="index_right")
+                )
+                ter_data = [ter_blocks.drop(columns=["land_use", "geometry"]).sum().to_dict()]
+                ter_input = pd.DataFrame(ter_data)
+                split_results[tid] = await self.run_social_reg_prediction(ter_blocks, ter_input)
+
+        return SocioEconomicResponseSchema(
+            socio_economic_prediction={sid: main_res.socio_economic_prediction},
+            split_prediction=split_results or None,
             params_data=params,
         )
 
