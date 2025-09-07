@@ -44,7 +44,7 @@ from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
-    SocioEconomicByProjectDTO, SocioEconomicByScenarioDTO,
+    SocioEconomicByProjectDTO, SocioEconomicByScenarioDTO, SourceYear, SocioEconomicByProjectComputedDTO,
 )
 from .modules.context_service import (
     get_context_blocks,
@@ -486,12 +486,14 @@ class EffectsService:
 
         landuse_cols = ["residential", "business", "recreation", "industrial", "transport", "special", "agriculture"]
         results_by_scenario: Dict[int, Dict[str, Any]] = {}
+        project_sources: Dict[int, SourceYear] = {}
 
         for s in target:
             sid = s["scenario_id"]
             proj_src, proj_year = await urban_api_gateway.get_optimal_func_zone_request_data(
                 token=token, data_id=sid, source=None, year=None, project=True
             )
+            project_sources[sid] = SourceYear(source=proj_src, year=proj_year)
             scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(sid, proj_src, proj_year, token)
             scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
 
@@ -512,10 +514,19 @@ class EffectsService:
 
             results_by_scenario[sid] = main_res.socio_economic_prediction
 
+        computed_params = SocioEconomicByProjectComputedDTO(
+            project_id=project_id,
+            regional_scenario_id=regional_sid,
+            split=params.split,
+            context_func_zone_source=ctx_src,
+            context_func_source_year=ctx_year,
+            project_sources=project_sources,
+        )
+
         return SocioEconomicResponseSchema(
             socio_economic_prediction=results_by_scenario,
             split_prediction=context_split or None,
-            params_data=params,
+            params_data=computed_params,
         )
 
     async def evaluate_master_plan_by_scenario(
@@ -527,18 +538,20 @@ class EffectsService:
         project_id = await urban_api_gateway.get_project_id(sid, token)
         project_info = await urban_api_gateway.get_all_project_info(project_id, token)
         context_territories = project_info.get("properties", {}).get("context") or []
+        params = await self.get_optimal_func_zone_data(params, token)
 
-        ctx_src, ctx_year = await urban_api_gateway.get_optimal_func_zone_request_data(
-            token=token, data_id=sid, source=params.context_func_zone_source, year=params.context_func_source_year,
-            project=False
-        )
-        proj_src, proj_year = await urban_api_gateway.get_optimal_func_zone_request_data(
-            token=token, data_id=sid, source=params.proj_func_zone_source, year=params.proj_func_source_year,
-            project=True
-        )
+        context_blocks, _ = await self.aggregate_blocks_layer_context(
+            sid,
+            params.context_func_zone_source,
+            params.proj_func_source_year,
+            token)
 
-        context_blocks, _ = await self.aggregate_blocks_layer_context(sid, ctx_src, ctx_year, token)
-        scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(sid, proj_src, proj_year, token)
+        scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
+            sid,
+            params.proj_func_zone_source,
+            params.proj_func_source_year,
+            token)
+
         scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
 
         blocks = gpd.GeoDataFrame(pd.concat([context_blocks, scenario_blocks], ignore_index=True),

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.effects_api.dto.development_dto import ContextDevelopmentDTO, DevelopmentDTO, SocioEconomicByProjectDTO, \
-    SocioEconomicByScenarioDTO
+    SocioEconomicByScenarioDTO, SocioEconomicByProjectComputedDTO
 
 from .output_maps import pred_columns_names_map, soc_economy_pred_name_map
 
@@ -63,4 +63,10 @@ class SocioEconomicSchema(BaseModel):
 class SocioEconomicResponseSchema(SocioEconomicSchema):
     socio_economic_prediction: Dict[int, Dict[str, SocioEconomicParams]]
     split_prediction: Optional[Dict[int, SocioEconomicSchema]]
-    params_data: Union[DevelopmentDTO, ContextDevelopmentDTO, SocioEconomicByProjectDTO, SocioEconomicByScenarioDTO]
+    params_data: Union[
+        DevelopmentDTO,
+        ContextDevelopmentDTO,
+        SocioEconomicByProjectDTO,
+        SocioEconomicByScenarioDTO,
+        SocioEconomicByProjectComputedDTO,
+    ]
