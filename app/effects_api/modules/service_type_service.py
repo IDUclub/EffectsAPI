@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import pandas as pd
 from blocksnet.config import service_types_config
@@ -18,33 +18,41 @@ async def _adapt_name(service_type_id: int):
     return SERVICE_TYPES_MAPPING.get(service_type_id)
 
 
-async def _adapt_social_values(service_type_id: int):
-    social_values = await urban_api_gateway.get_service_type_social_values(
-        service_type_id
-    )
-    if social_values is None:
-        return None
-    else:
-        return list(social_values.index)
+_SOCIAL_VALUES_BY_ST: Dict[int, Optional[List[int]]] = {}
+_SOCIAL_VALUES_LOCK = asyncio.Lock()
 
+async def _warmup_social_values(service_type_ids: List[int]) -> None:
+    missing = [sid for sid in service_type_ids if sid not in _SOCIAL_VALUES_BY_ST]
+    if not missing:
+        return
+    async with _SOCIAL_VALUES_LOCK:
+        missing = [sid for sid in service_type_ids if sid not in _SOCIAL_VALUES_BY_ST]
+        if not missing:
+            return
+        results = await asyncio.gather(
+            *(urban_api_gateway.get_service_type_social_values(sid) for sid in missing)
+        )
+        for sid, df in zip(missing, results):
+            _SOCIAL_VALUES_BY_ST[sid] = None if df is None else list(df.index)
+
+async def _adapt_social_values(service_type_id: int) -> Optional[List[int]]:
+    await _warmup_social_values([service_type_id])
+    return _SOCIAL_VALUES_BY_ST.get(service_type_id)
 
 async def adapt_service_types(service_types_df: pd.DataFrame) -> pd.DataFrame:
     df = service_types_df[["infrastructure_type"]].copy()
     df["infrastructure_weight"] = service_types_df["weight_value"]
 
-    service_type_ids = df.index.tolist()
+    service_type_ids: List[int] = list(df.index)
 
     names: List[Optional[str]] = await asyncio.gather(
         *(_adapt_name(st_id) for st_id in service_type_ids)
     )
     df["name"] = names
-
     df = df.dropna(subset=["name"]).copy()
 
-    social_vals: List[Optional[List[int]]] = await asyncio.gather(
-        *(_adapt_social_values(st_id) for st_id in df.index)
-    )
-    df["social_values"] = social_vals
+    await _warmup_social_values(list(df.index))
+    df["social_values"] = [ _SOCIAL_VALUES_BY_ST.get(st_id) for st_id in df.index ]
 
     return df[["name", "infrastructure_type", "infrastructure_weight", "social_values"]]
 
