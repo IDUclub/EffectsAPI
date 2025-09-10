@@ -17,38 +17,38 @@ class JSONAPIHandler:
             None
         """
 
-        self.__name__ = "UrbanAPIGateway"
+        self.__name__ = "UrbanAPIClient"
         self.base_url = base_url
 
     @staticmethod
     async def _check_response_status(
         response: aiohttp.ClientResponse,
     ) -> list | dict | None:
-        """Function handles response
-
-        Args:
-            response (aiohttp.ClientResponse): Response object
-        Returns:
-            list|dict: requested data with additional info, e.g. {"retry": True | False, "response": {response.json}}
-        Raises:
-            http_exception with response status code from API
-        """
-
+        """Function handles response"""
         if response.status in (200, 201):
             return await response.json(content_type="application/json")
+
         elif response.status == 500:
-            if response.content_type == "application/json":
+            # определим тип контента по заголовку
+            content_type = (response.headers.get("Content-Type") or "").lower()
+
+            if "application/json" in content_type:
                 response_info = await response.json()
-                if "reset by peer" in await response_info["error"]:
+                err = response_info.get("error", "")
+                if isinstance(err, (dict, list)):
+                    err = str(err)
+                if "reset by peer" in err:
                     return None
             else:
                 response_info = await response.text()
+
             raise http_exception(
                 response.status,
                 "Couldn't get data from API",
                 _input=str(response.url),
                 _detail=response_info,
             )
+
         else:
             raise http_exception(
                 response.status,
@@ -163,6 +163,7 @@ class JSONAPIHandler:
                     endpoint_url=endpoint_url,
                     headers=headers,
                     params=params,
+                    data=data,
                     session=session,
                 )
             return result
@@ -209,6 +210,7 @@ class JSONAPIHandler:
                     endpoint_url=endpoint_url,
                     headers=headers,
                     params=params,
+                    data=data,
                     session=session,
                 )
             return result
@@ -255,6 +257,7 @@ class JSONAPIHandler:
                     endpoint_url=endpoint_url,
                     headers=headers,
                     params=params,
+                    data=data,
                     session=session,
                 )
             return result

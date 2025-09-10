@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Literal, Optional, List
+from typing import Any, Dict, List, Literal, Optional
 
 import geopandas as gpd
 import pandas as pd
@@ -10,11 +10,11 @@ from app.common.api_handlers.json_api_handler import JSONAPIHandler
 from app.common.exceptions.http_exception_wrapper import http_exception
 
 
-class UrbanAPIGateway:
+class UrbanAPIClient:
 
-    def __init__(self, base_url: str) -> None:
-        self.json_handler = JSONAPIHandler(base_url)
-        self.__name__ = "UrbanAPIGateway"
+    def __init__(self, json_handler: JSONAPIHandler) -> None:
+        self.json_handler = json_handler
+        self.__name__ = "UrbanAPIClient"
 
     # TODO context
     async def get_physical_objects(
@@ -34,7 +34,9 @@ class UrbanAPIGateway:
             "physical_object_id"
         )
 
-    async def get_services(self, scenario_id: int, token, **kwargs: Any) -> gpd.GeoDataFrame:
+    async def get_services(
+        self, scenario_id: int, token, **kwargs: Any
+    ) -> gpd.GeoDataFrame:
         headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/services_with_geometry",
@@ -46,7 +48,9 @@ class UrbanAPIGateway:
             "service_id"
         )
 
-    async def get_functional_zones_sources(self, scenario_id: int, token: str) -> pd.DataFrame:
+    async def get_functional_zones_sources(
+        self, scenario_id: int, token: str
+    ) -> pd.DataFrame:
         headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/functional_zone_sources",
@@ -55,7 +59,7 @@ class UrbanAPIGateway:
         return pd.DataFrame(res)
 
     async def get_functional_zones(
-        self, scenario_id: int, year: int, source: int, token: str
+        self, scenario_id: int, year: int, source: str, token: str
     ) -> gpd.GeoDataFrame:
         headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
@@ -275,9 +279,7 @@ class UrbanAPIGateway:
 
         return project_id
 
-    async def get_all_project_info(
-        self, project_id: int, token: Optional[str] = None
-    ) -> dict:
+    async def get_all_project_info(self, project_id: int, token: str) -> dict:
         url = f"/api/v1/projects/{project_id}"
         try:
             response = await self.json_handler.get(
@@ -383,7 +385,9 @@ class UrbanAPIGateway:
 
         return base["scenario_id"]
 
-    async def get_project_scenarios(self, project_id: int, token: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_project_scenarios(
+        self, project_id: int, token: str
+    ) -> List[Dict[str, Any]]:
         headers = {"Authorization": f"Bearer {token}"} if token else None
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/scenarios",

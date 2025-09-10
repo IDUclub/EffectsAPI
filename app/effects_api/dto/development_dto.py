@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Dict
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -38,41 +38,3 @@ class ContextDevelopmentDTO(DevelopmentDTO):
         examples=[2023, 2024],
         description="Year of the chosen context functional-zone source.",
     )
-
-
-class SocioEconomicByScenarioDTO(ContextDevelopmentDTO):
-
-    split: bool = Field(
-        default=False,
-        examples=[False, True],
-        description="If split will return additional evaluation for each context mo",
-    )
-
-
-class SocioEconomicByProjectDTO(BaseModel):
-    project_id: int = Field(
-        ...,
-        examples=[120],
-        description="Project ID to retrieve data from.",
-    )
-
-    regional_scenario_id: int = Field(
-        ...,
-        examples=[122],
-        description="Regional scenario ID using for filtering.",
-    )
-
-    split: bool = Field(
-        default=False,
-        examples=[False, True],
-        description="If split will return additional evaluation for each context mo",
-    )
-
-class SourceYear(BaseModel):
-    source: Literal["PZZ", "OSM", "User"]
-    year: int
-
-class SocioEconomicByProjectComputedDTO(SocioEconomicByProjectDTO):
-    context_func_zone_source: Literal["PZZ", "OSM", "User"]
-    context_func_source_year: int
-    project_sources: Dict[int, SourceYear]

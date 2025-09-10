@@ -7,18 +7,22 @@ from starlette.responses import JSONResponse
 
 from app.common.auth.auth import verify_token
 
+from ..dependencies import effects_service
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
-    SocioEconomicByProjectDTO,
-    SocioEconomicByScenarioDTO
 )
+from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
+from .dto.socio_economic_scenario_dto import SocioEconomicByScenarioDTO
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
-from .effects_service import effects_service
 from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
 
 development_router = APIRouter(prefix="/development", tags=["Effects"])
+f_22_router = APIRouter(prefix="/f22", tags=["Effects"])
+f_26_router = APIRouter(prefix="/f26", tags=["Effects"])
+f_35_router = APIRouter(prefix="/f35", tags=["Effects"])
+f_36_router = APIRouter(prefix="/f36", tags=["Effects"])
 
 
 @development_router.get(
@@ -41,7 +45,7 @@ async def get_context_development(
     return await effects_service.calc_context_development(token, params)
 
 
-@development_router.get(
+@f_22_router.get(
     "/project_socio_economic_prediction", response_model=SocioEconomicResponseSchema
 )
 async def get_socio_economic_prediction(
@@ -50,7 +54,8 @@ async def get_socio_economic_prediction(
 ) -> SocioEconomicResponseSchema:
     return await effects_service.evaluate_master_plan_by_project(params, token)
 
-@development_router.get(
+
+@f_22_router.get(
     "/scenario_socio_economic_prediction", response_model=SocioEconomicResponseSchema
 )
 async def get_socio_economic_prediction(
@@ -60,7 +65,7 @@ async def get_socio_economic_prediction(
     return await effects_service.evaluate_master_plan_by_scenario(params, token)
 
 
-@development_router.get("/territory_transformation")
+@f_35_router.get("/territory_transformation")
 async def territory_transformation(
     params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
     token: str = Depends(verify_token),
@@ -71,16 +76,18 @@ async def territory_transformation(
     geojson_dict = json.loads(gdf.to_json(drop_id=True))
     return JSONResponse(content=geojson_dict)
 
-@development_router.get("/values_development")
+
+@f_26_router.get("/values_development")
 async def values_development(
     params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
-    token: str = Depends(verify_token)
+    token: str = Depends(verify_token),
 ):
     return await effects_service.values_transformation(token, params)
 
-@development_router.get("/values_oriented_requirements")
+
+@f_36_router.get("/values_oriented_requirements")
 async def values_requirements(
-        params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
-        token: str = Depends(verify_token)
+    params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
+    token: str = Depends(verify_token),
 ):
     return await effects_service.values_oriented_requirements(token, params)

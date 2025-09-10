@@ -6,7 +6,13 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 
 from app.common.exceptions.exception_handler import ExceptionHandlerMiddleware
-from app.effects_api.effects_controller import development_router
+from app.effects_api.effects_controller import (
+    development_router,
+    f_22_router,
+    f_26_router,
+    f_35_router,
+    f_36_router,
+)
 from app.effects_api.modules.task_service import lifespan
 from app.effects_api.tasks_controller import router as tasks_router
 from app.system_router.system_controller import system_router
@@ -40,3 +46,8 @@ async def read_root():
 app.include_router(tasks_router)
 app.include_router(system_router)
 app.include_router(development_router)
+
+app.include_router(f_22_router)
+app.include_router(f_26_router)
+app.include_router(f_35_router)
+app.include_router(f_36_router)

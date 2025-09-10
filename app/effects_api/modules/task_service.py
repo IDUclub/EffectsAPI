@@ -1,17 +1,14 @@
 import asyncio
 import contextlib
 import json
-import uuid
 from contextlib import asynccontextmanager
-from datetime import timedelta
 from typing import Any, Callable, Literal
 
 import geopandas as gpd
 from fastapi import FastAPI
 from loguru import logger
 
-from app.common.caching.caching_service import cache
-from app.effects_api.effects_service import effects_service
+from app.dependencies import effects_service, file_cache
 
 MethodFunc = Callable[[str, Any], "dict[str, Any]"]
 
@@ -26,7 +23,15 @@ _task_map: dict[str, "AnyTask"] = {}
 
 
 class AnyTask:
-    def __init__(self, method: str, scenario_id: int, token: str, params: Any, params_hash: str):
+    def __init__(
+        self,
+        method: str,
+        scenario_id: int,
+        token: str,
+        params: Any,
+        params_hash: str,
+        cache: file_cache,
+    ):
         self.method = method
         self.scenario_id = scenario_id
         self.token = token
@@ -37,6 +42,7 @@ class AnyTask:
         self.status: Literal["queued", "running", "done", "failed"] = "queued"
         self.result: dict | None = None
         self.error: str | None = None
+        self.cache = cache
 
     async def to_response(self) -> dict:
         if self.status in {"queued", "running"}:
@@ -50,7 +56,7 @@ class AnyTask:
             logger.info(f"[{self.task_id}] started")
             self.status = "running"
 
-            cached = cache.load(self.method, self.scenario_id, self.param_hash)
+            cached = self.cache.load(self.method, self.scenario_id, self.param_hash)
             if cached:
                 logger.info(f"[{self.task_id}] loaded from cache")
                 self.result = cached["data"]
@@ -85,9 +91,11 @@ class AnyTask:
 async def create_task(method: str, token: str, params) -> str:
     norm_params = await effects_service.get_optimal_func_zone_data(params, token)
     params_for_hash = await effects_service.build_hash_params(norm_params, token)
-    phash = cache.params_hash(params_for_hash)
+    phash = file_cache.params_hash(params_for_hash)
 
-    task = AnyTask(method, norm_params.scenario_id, token, norm_params, phash)
+    task = AnyTask(
+        method, norm_params.scenario_id, token, norm_params, phash, file_cache
+    )
     _task_map[task.task_id] = task
     await _task_queue.put(task)
     return task.task_id
@@ -124,7 +132,9 @@ class Worker:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.task
 
+
 worker = Worker()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
