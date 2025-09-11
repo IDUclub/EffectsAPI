@@ -3,6 +3,7 @@ import json
 import geopandas as gpd
 import pandas as pd
 
+from app.common.exceptions.http_exception_wrapper import http_exception
 from app.effects_api.constants.const import COL_RU
 from app.effects_api.modules.scenario_service import SOURCES_PRIORITY
 
@@ -25,29 +26,25 @@ async def get_best_functional_zones_source(
     source: str | None = None,
     year: int | None = None,
 ) -> tuple[int | None, str | None]:
-    if year is not None:
-        year = int(year)
 
-    if source and year is not None:
+    if source and year:
         row = sources_df.query("source == @source and year == @year")
         if not row.empty:
             return year, source
-        source = None
-
-    if year is not None and source is None:
+        return await get_best_functional_zones_source(sources_df, None, year)
+    elif source and not year:
+        rows = sources_df.query("source == @source")
+        if not rows.empty:
+            return int(rows["year"].max()), source
+        return await get_best_functional_zones_source(sources_df, None, year)
+    elif year and not source:
         for s in SOURCES_PRIORITY:
             row = sources_df.query("source == @s and year == @year")
             if not row.empty:
                 return year, s
-
-    elif source and year is None:
-        rows = sources_df.query("source == @source")
-        if not rows.empty:
-            return int(rows["year"].max()), source
-
     for s in SOURCES_PRIORITY:
         rows = sources_df.query("source == @s")
         if not rows.empty:
             return int(rows["year"].max()), s
 
-    raise ValueError("No available functional zone sources to choose from")
+    raise http_exception(404, "No available functional zone sources to choose from")

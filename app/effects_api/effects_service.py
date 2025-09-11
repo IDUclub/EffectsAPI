@@ -952,6 +952,18 @@ class EffectsService:
             * service_types["infrastructure_weight"]
         )
 
+        if (
+            "population" not in after_blocks.columns
+            or after_blocks["population"].isna().any()
+        ):
+            dev_df = await self.run_development_parameters(after_blocks)
+            after_blocks["population"] = pd.to_numeric(
+                dev_df["population"], errors="coerce"
+            ).fillna(0)
+        else:
+            after_blocks["population"] = pd.to_numeric(
+                after_blocks["population"], errors="coerce"
+            ).fillna(0)
         facade = self._build_facade(after_blocks, acc_mx, service_types)
 
         services_weights = service_types.set_index("name")[
@@ -962,7 +974,7 @@ class EffectsService:
             num_params=facade.num_params,
             facade=facade,
             weights=services_weights,
-            max_evals=50,
+            max_evals=30,
         )
         constraints = WeightedConstraints(num_params=facade.num_params, facade=facade)
         tpe_optimizer = TPEOptimizer(
@@ -972,7 +984,7 @@ class EffectsService:
         )
 
         best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=50, timeout=60000, initial_runs_num=1
+            max_runs=30, timeout=60000, initial_runs_num=1
         )
 
         prov_gdfs_after = {}
