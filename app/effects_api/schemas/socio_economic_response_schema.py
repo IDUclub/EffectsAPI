@@ -1,10 +1,18 @@
-from typing import Optional
+from typing import Dict, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.effects_api.dto.development_dto import ContextDevelopmentDTO, DevelopmentDTO
+from app.effects_api.dto.development_dto import (
+    ContextDevelopmentDTO,
+    DevelopmentDTO,
+)
 
+from ..dto.socio_economic_project_dto import (
+    SocioEconomicByProjectComputedDTO,
+    SocioEconomicByProjectDTO,
+)
+from ..dto.socio_economic_scenario_dto import SocioEconomicByScenarioDTO
 from .output_maps import pred_columns_names_map, soc_economy_pred_name_map
 
 
@@ -60,15 +68,12 @@ class SocioEconomicSchema(BaseModel):
 
 
 class SocioEconomicResponseSchema(SocioEconomicSchema):
-    """
-    DTO Class for socio-economic response
-    Attributes:
-        socio_economic_prediction (dict[str, SocioEconomicParams]): where SocioEconomicParams is class containing fields
-        (pred: int, lower: int, upper: float, is_interval: bool)
-        split_prediction (Optional[list[SocioEconomicSchema]]): optional list of context predictions as list
-        of SocioEconomicSchema
-        params_data (DevelopmentDTO | ContextDevelopmentDTO):
-    """
-
-    split_prediction: Optional[dict[int, SocioEconomicSchema]]
-    params_data: DevelopmentDTO | ContextDevelopmentDTO
+    socio_economic_prediction: Dict[int, Dict[str, SocioEconomicParams]]
+    split_prediction: Optional[Dict[int, SocioEconomicSchema]]
+    params_data: Union[
+        DevelopmentDTO,
+        ContextDevelopmentDTO,
+        SocioEconomicByProjectDTO,
+        SocioEconomicByScenarioDTO,
+        SocioEconomicByProjectComputedDTO,
+    ]

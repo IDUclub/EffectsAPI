@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 _CACHE_DIR = Path().absolute() / "__effects_cache__"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -99,6 +99,3 @@ class FileCache:
         self, method: str, scenario_id: int, max_age: timedelta | None = None
     ) -> bool:
         return self.load(method, scenario_id, max_age) is not None
-
-
-cache = FileCache()
