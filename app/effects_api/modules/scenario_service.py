@@ -1,3 +1,5 @@
+import asyncio
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -79,20 +81,20 @@ class ScenarioService:
         crs = boundaries.crs
         boundaries.geometry = boundaries.buffer(-1)
 
-        water = await self._get_scenario_water(user_scenario_id, token)
+        water, user_roads, base_roads = await asyncio.gather(
+            self._get_scenario_water(user_scenario_id, token),
+            self._get_scenario_roads(user_scenario_id, token),
+            self._get_scenario_roads(base_scenario_id, token),
+        )
+
         if water is not None and not water.empty:
-            water = water.to_crs(crs)
-            water = water.explode()
+            water = water.to_crs(crs).explode()
 
-        user_roads = await self._get_scenario_roads(user_scenario_id, token)
         if user_roads is not None and not user_roads.empty:
-            user_roads = user_roads.to_crs(crs)
-            user_roads = user_roads.explode()
+            user_roads = user_roads.to_crs(crs).explode()
 
-        base_roads = await self._get_scenario_roads(base_scenario_id, token)
         if base_roads is not None and not base_roads.empty:
-            base_roads = base_roads.to_crs(crs)
-            base_roads = base_roads.explode()
+            base_roads = base_roads.to_crs(crs).explode()
 
         if (
             base_roads is not None
@@ -116,37 +118,6 @@ class ScenarioService:
         project = await self.client.get_project(project_id, token)
         base_scenario_id = project["base_scenario"]["id"]
         return project_id, base_scenario_id
-
-    async def _get_best_functional_zones_source(
-        self,
-        sources_df: pd.DataFrame,
-        source: str | None = None,
-        year: int | None = None,
-    ) -> tuple[int | None, str | None]:
-        """Выбор (year, source) по приоритетам."""
-        if source and year:
-            row = sources_df.query("source == @source and year == @year")
-            if not row.empty:
-                return year, source
-            year = int(year)
-            source = None
-
-        if source and year is None:
-            rows = sources_df.query("source == @source")
-            if not rows.empty:
-                return int(rows["year"].max()), source
-            source = None
-
-        if year is not None and source is None:
-            for s in SOURCES_PRIORITY:
-                row = sources_df.query("source == @s and year == @year")
-                if not row.empty:
-                    return year, s
-
-        for s in SOURCES_PRIORITY:
-            rows = sources_df.query("source == @s")
-            if not rows.empty:
-                return int(rows["year"].max()), s
 
     async def get_scenario_blocks(
         self, user_scenario_id: int, token: str

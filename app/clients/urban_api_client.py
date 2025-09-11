@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal
 
 import geopandas as gpd
 import pandas as pd
@@ -35,7 +35,7 @@ class UrbanAPIClient:
         )
 
     async def get_services(
-        self, scenario_id: int, token, **kwargs: Any
+        self, scenario_id: int, token: str, **kwargs: Any
     ) -> gpd.GeoDataFrame:
         headers = {"Authorization": f"Bearer {token}"}
         res = await self.json_handler.get(
@@ -263,7 +263,7 @@ class UrbanAPIClient:
     async def get_project_id(
         self,
         scenario_id: int,
-        token: str | None = None,
+        token: str,
     ) -> int:
         endpoint = f"/api/v1/scenarios/{scenario_id}"
         response = await self.json_handler.get(

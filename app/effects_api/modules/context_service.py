@@ -1,9 +1,12 @@
+import asyncio
+
 import geopandas as gpd
 import pandas as pd
 from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
 from blocksnet.preprocessing.imputing import impute_buildings, impute_services
 
 from app.clients.urban_api_client import UrbanAPIClient
+from app.common.utils.geodata import get_best_functional_zones_source
 from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import adapt_functional_zones
@@ -52,10 +55,12 @@ async def _get_context_blocks(
     crs = boundaries.crs
     boundaries.geometry = boundaries.buffer(-1)
 
-    water = await _get_context_water(scenario_id, token, client)
-    water = water.to_crs(crs)
+    water, roads = await asyncio.gather(
+        _get_context_water(scenario_id, token, client),
+        _get_context_roads(scenario_id, token, client),
+    )
 
-    roads = await _get_context_roads(scenario_id, token, client)
+    water = water.to_crs(crs)
     roads = roads.to_crs(crs)
     roads.geometry = close_gaps(roads, 1)
 
@@ -67,8 +72,10 @@ async def _get_context_blocks(
 async def get_context_blocks(
     project_id: int, scenario_id: int, token: str, client: UrbanAPIClient
 ) -> gpd.GeoDataFrame:
-    project_boundaries = await _get_project_boundaries(project_id, token, client)
-    context_boundaries = await _get_context_boundaries(project_id, token, client)
+    project_boundaries, context_boundaries = await asyncio.gather(
+        _get_project_boundaries(project_id, token, client),
+        _get_context_boundaries(project_id, token, client),
+    )
 
     crs = context_boundaries.estimate_utm_crs()
     context_boundaries = context_boundaries.to_crs(crs)
@@ -80,36 +87,6 @@ async def get_context_blocks(
     return await _get_context_blocks(scenario_id, context_boundaries, token, client)
 
 
-def _choose_best_fz_source(
-    sources_df: pd.DataFrame, source: str | None, year: int | None
-) -> tuple[int, str]:
-    df = sources_df.copy()
-    if source and year:
-        row = df.query("source == @source and year == @year")
-        if not row.empty:
-            return int(year), str(source)
-        source = None
-
-    if source and year is None:
-        rows = df.query("source == @source")
-        if not rows.empty:
-            return int(rows["year"].max()), str(source)
-        source = None
-
-    if year is not None and source is None:
-        for s in _SOURCES_PRIORITY:
-            row = df.query("source == @s and year == @year")
-            if not row.empty:
-                return int(year), s
-
-    for s in _SOURCES_PRIORITY:
-        rows = df.query("source == @s")
-        if not rows.empty:
-            return int(rows["year"].max()), s
-
-    raise ValueError("No available functional zone sources to choose from")
-
-
 async def get_context_functional_zones(
     scenario_id: int,
     source: str | None,
@@ -118,7 +95,7 @@ async def get_context_functional_zones(
     client: UrbanAPIClient,
 ) -> gpd.GeoDataFrame:
     sources_df = await client.get_functional_zones_sources(scenario_id, token)
-    year, source = _choose_best_fz_source(sources_df, source, year)
+    year, source = await get_best_functional_zones_source(sources_df, source, year)
     functional_zones = await client.get_functional_zones(
         scenario_id, year, source, token
     )
