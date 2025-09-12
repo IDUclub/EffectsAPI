@@ -115,12 +115,12 @@ async def get_values_oriented_requirements_layer(scenario_id: int, service_name:
 
     data: dict = cached["data"]
 
-    fc_before = data["provision"].get(service_name)
-    fc_after = data["result"]
-    if not (fc_before and fc_after):
+    fc_provision = data["provision"].get(service_name)
+    values_dict = data["result"]
+    if not (fc_provision and values_dict):
         raise http_exception(404, f"service '{service_name}' not found")
 
-    return JSONResponse(content={"geojson": fc_before, "values_table": fc_after})
+    return JSONResponse(content={"geojson": fc_provision, "values_table": values_dict})
 
 
 @router.get("/get_from_cache/{method_name}/{scenario_id}")
