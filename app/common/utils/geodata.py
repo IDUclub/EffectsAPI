@@ -1,25 +1,50 @@
+import asyncio
 import json
 
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry.base import BaseGeometry
+from shapely.wkt import loads, dumps
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.effects_api.constants.const import COL_RU
 from app.effects_api.modules.scenario_service import SOURCES_PRIORITY
 
 
-def gdf_to_ru_fc(gdf: gpd.GeoDataFrame) -> dict:
+async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
     if "provision_weak" in gdf.columns:
         gdf = gdf.drop(columns="provision_weak")
     gdf = gdf.rename(
-        columns={k: v for k, v in COL_RU.items() if k in gdf.columns}, errors="raise"
+        columns={k: v for k, v in COL_RU.items() if k in gdf.columns},
+        errors="raise",
     )
-    return json.loads(gdf.to_crs(4326).to_json(drop_id=True))
+    gdf = gdf.to_crs(4326)
+
+    gdf_copy = gdf.copy()
+    gdf_copy.geometry = await round_coords(gdf_copy.geometry, ndigits=ndigits)
+
+    return json.loads(gdf_copy.to_json(drop_id=True))
 
 
 def fc_to_gdf(fc: dict) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
 
+async def round_coords(
+    geometry: gpd.GeoSeries | BaseGeometry,
+    ndigits: int = 6
+) -> gpd.GeoSeries | BaseGeometry:
+    if isinstance(geometry, gpd.GeoSeries):
+        return await asyncio.to_thread(
+            geometry.map,
+            lambda geom: loads(dumps(geom, rounding_precision=ndigits)),
+        )
+    elif isinstance(geometry, BaseGeometry):
+        return await asyncio.to_thread(
+            loads,
+            dumps(geometry, rounding_precision=ndigits),
+        )
+    else:
+        raise TypeError("geometry must be GeoSeries or Shapely geometry")
 
 async def get_best_functional_zones_source(
     sources_df: pd.DataFrame,
