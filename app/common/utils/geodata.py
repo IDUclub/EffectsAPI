@@ -21,7 +21,7 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
     gdf = gdf.to_crs(4326)
 
     gdf_copy = gdf.copy()
-    gdf_copy.geometry = await round_coords(gdf_copy.geometry, ndigits=ndigits)
+    gdf_copy.geometry = await asyncio.to_thread(round_coords, gdf_copy.geometry, ndigits)
 
     return json.loads(gdf_copy.to_json(drop_id=True))
 
@@ -29,22 +29,17 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
 def fc_to_gdf(fc: dict) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
 
-async def round_coords(
+def round_coords(
     geometry: gpd.GeoSeries | BaseGeometry,
     ndigits: int = 6
 ) -> gpd.GeoSeries | BaseGeometry:
     if isinstance(geometry, gpd.GeoSeries):
-        return await asyncio.to_thread(
-            geometry.map,
-            lambda geom: loads(dumps(geom, rounding_precision=ndigits)),
-        )
+        return geometry.map(lambda geom: loads(dumps(geom, rounding_precision=ndigits)))
     elif isinstance(geometry, BaseGeometry):
-        return await asyncio.to_thread(
-            loads,
-            dumps(geometry, rounding_precision=ndigits),
-        )
+        return loads(dumps(geometry, rounding_precision=ndigits))
     else:
         raise TypeError("geometry must be GeoSeries or Shapely geometry")
+
 
 async def get_best_functional_zones_source(
     sources_df: pd.DataFrame,
