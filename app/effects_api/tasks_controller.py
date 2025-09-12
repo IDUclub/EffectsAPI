@@ -107,6 +107,22 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
     return JSONResponse(content={"before": fc_before, "after": fc_after})
 
 
+@router.get("/values_oriented_requirements/{scenario_id}/{service_name}")
+async def get_values_oriented_requirements_layer(scenario_id: int, service_name: str):
+    cached = file_cache.load_latest("values_oriented_requirements", scenario_id)
+    if not cached:
+        raise http_exception(404, "no saved result for this scenario", scenario_id)
+
+    data: dict = cached["data"]
+
+    fc_provision = data["provision"].get(service_name)
+    values_dict = data["result"]
+    if not (fc_provision and values_dict):
+        raise http_exception(404, f"service '{service_name}' not found")
+
+    return JSONResponse(content={"geojson": fc_provision, "values_table": values_dict})
+
+
 @router.get("/get_from_cache/{method_name}/{scenario_id}")
 async def get_layer(scenario_id: int, method_name: str):
     cached = file_cache.load_latest(method_name, scenario_id)

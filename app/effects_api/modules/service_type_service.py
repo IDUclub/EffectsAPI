@@ -89,10 +89,19 @@ async def get_services_with_ids_from_layer(
                 result.append({"id": None, "name": name})
         return result
 
-    before_names = list(data.get("before", {}).keys())
-    after_names = list(data.get("after", {}).keys())
+    if "before" in data or "after" in data:
+        before_names = list(data.get("before", {}).keys())
+        after_names = list(data.get("after", {}).keys())
+        return {
+            "before": map_services(before_names),
+            "after": map_services(after_names),
+        }
 
-    return {
-        "before": map_services(before_names),
-        "after": map_services(after_names),
-    }
+    if "provision" in data:
+        prov_names = list(data["provision"].keys())
+        return {
+            "services": map_services(prov_names)
+        }
+
+    return {"before": [], "after": []}
+

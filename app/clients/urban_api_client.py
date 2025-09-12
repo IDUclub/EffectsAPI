@@ -394,3 +394,7 @@ class UrbanAPIClient:
             headers=headers,
         )
         return res
+
+    async def get_social_values_info(self) -> dict[int, str]:
+        res = await self.json_handler.get("/api/v1/social_values")
+        return {item["soc_value_id"]: item["name"] for item in res}
