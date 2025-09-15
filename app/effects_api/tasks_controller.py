@@ -71,10 +71,25 @@ async def create_task(
 
 @router.get("/status/{task_id}")
 async def task_status(task_id: str):
+    method, scenario_id, phash = file_cache.parse_task_id(task_id)
+    if method and scenario_id is not None and phash:
+        try:
+            cached = file_cache.load(method, scenario_id, phash)
+            if cached:
+                return {"task_id": task_id, "status": "done"}
+        except Exception:
+            pass
     task = _task_map.get(task_id)
-    if not task:
-        raise http_exception(404, "task not found", task_id)
-    return await task.to_response()
+    if task:
+        payload = {
+            "task_id": getattr(task, "task_id", task_id),
+            "status": getattr(task, "status", "unknown"),
+        }
+        if payload["status"] == "failed" and getattr(task, "error", None):
+            payload["error"] = str(task.error)
+        return payload
+
+    raise http_exception(404, "task not found", task_id)
 
 
 @router.get("/get_service_types")

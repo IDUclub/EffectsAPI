@@ -99,3 +99,13 @@ class FileCache:
         self, method: str, scenario_id: int, max_age: timedelta | None = None
     ) -> bool:
         return self.load(method, scenario_id, max_age) is not None
+
+    def parse_task_id(self, task_id: str):
+        parts = task_id.split("_")
+        if len(parts) < 3:
+            return None, None, None
+        phash = parts[-1]
+        scenario_id_raw = parts[-2]
+        method = "_".join(parts[:-2])
+        scenario_id = int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        return method, scenario_id, phash
