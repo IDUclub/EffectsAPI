@@ -26,9 +26,11 @@ from blocksnet.relations import (
     get_accessibility_graph,
 )
 from loguru import logger
+from shapely.ops import unary_union
 
 from app.effects_api.modules.scenario_service import ScenarioService
 from app.effects_api.modules.service_type_service import adapt_service_types
+from ..clients.graph_api_client import GraphAPIClient
 
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
@@ -65,12 +67,14 @@ class EffectsService:
         urban_api_client: UrbanAPIClient,
         cache: FileCache,
         scenario_service: ScenarioService,
+        graph_api_client: GraphAPIClient,
     ):
         self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
         self.urban_api_client = urban_api_client
         self.cache = cache
         self.scenario = scenario_service
+        self.graph_api_client = graph_api_client
 
     async def build_hash_params(
         self,
@@ -761,7 +765,7 @@ class EffectsService:
         return blocks[["geometry"]].join(prov_df, how="right")
 
     async def territory_transformation_scenario_before(
-        self, token: str, params: ContextDevelopmentDTO
+        self, token: str, params: ContextDevelopmentDTO, context_blocks: pd.DataFrame | gpd.GeoDataFrame
     ):
         method_name = "territory_transformation"
 
@@ -807,12 +811,6 @@ class EffectsService:
             )
         )
 
-        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
-        )
 
         base_scenario_blocks, base_scenario_buildings = (
             await self.aggregate_blocks_layer_scenario(
@@ -886,7 +884,7 @@ class EffectsService:
         return facade
 
     async def territory_transformation_scenario_after(
-        self, token, params: ContextDevelopmentDTO | DevelopmentDTO
+        self, token, params: ContextDevelopmentDTO | DevelopmentDTO, context_blocks: pd.DataFrame | gpd.GeoDataFrame
     ):
         # provision after
         method_name = "territory_transformation"
@@ -923,13 +921,6 @@ class EffectsService:
         service_types = service_types[
             ~service_types["infrastructure_type"].isna()
         ].copy()
-
-        context_blocks, _ = await self.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
-        )
 
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,
@@ -1034,7 +1025,13 @@ class EffectsService:
         is_based = info["is_based"]
         updated_at = info["updated_at"]
 
-        prov_before = await self.territory_transformation_scenario_before(token, params)
+        context_blocks, _ = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
+        )
+        prov_before = await self.territory_transformation_scenario_before(token, params, context_blocks)
         if is_based:
             return prov_before
 
@@ -1053,7 +1050,7 @@ class EffectsService:
             }
             return {"before": prov_before, "after": prov_after}
 
-        prov_after = await self.territory_transformation_scenario_after(token, params)
+        prov_after = await self.territory_transformation_scenario_after(token, params, context_blocks)
         return {"before": prov_before, "after": prov_after}
 
     async def values_transformation(
@@ -1080,7 +1077,13 @@ class EffectsService:
             or "best_x" not in cached["data"]["opt_context"]
         )
         if need_refresh:
-            await self.territory_transformation_scenario_after(token, params)
+            context_blocks, _ = await self.aggregate_blocks_layer_context(
+                params.scenario_id,
+                params.context_func_zone_source,
+                params.context_func_source_year,
+                token,
+            )
+            await self.territory_transformation_scenario_after(token, params, context_blocks)
             cached = self.cache.load(method_name, params.scenario_id, phash)
 
         best_x = cached["data"]["opt_context"]["best_x"]
