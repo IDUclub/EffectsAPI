@@ -62,6 +62,7 @@ async def create_task(
         params_filled,
         params_for_hash,
         file_cache,
+        task_id
     )
     _task_map[task_id] = task
     await _task_queue.put(task)
@@ -79,15 +80,14 @@ async def task_status(task_id: str):
                 return {"task_id": task_id, "status": "done"}
         except Exception:
             pass
+
     task = _task_map.get(task_id)
     if task:
-        payload = {
-            "task_id": getattr(task, "task_id", task_id),
+        return {
+            "task_id": task_id,
             "status": getattr(task, "status", "unknown"),
+            **({"error": str(task.error)} if getattr(task, "status", None) == "failed" and getattr(task, "error", None) else {})
         }
-        if payload["status"] == "failed" and getattr(task, "error", None):
-            payload["error"] = str(task.error)
-        return payload
 
     raise http_exception(404, "task not found", task_id)
 

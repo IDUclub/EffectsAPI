@@ -31,6 +31,7 @@ class AnyTask:
         params: Any,
         params_hash: str,
         cache: file_cache,
+        task_id: str
     ):
         self.method = method
         self.scenario_id = scenario_id
@@ -38,11 +39,12 @@ class AnyTask:
         self.params = params
         self.param_hash = params_hash
 
-        self.task_id = f"{method}_{scenario_id}_{self.param_hash}"
+        # self.task_id = f"{method}_{scenario_id}_{self.param_hash}"
         self.status: Literal["queued", "running", "done", "failed"] = "queued"
         self.result: dict | None = None
         self.error: str | None = None
         self.cache = cache
+        self.task_id = task_id
 
     async def to_response(self) -> dict:
         if self.status in {"queued", "running"}:
@@ -88,13 +90,13 @@ class AnyTask:
             self.error = str(exc)
 
 
-async def create_task(method: str, token: str, params) -> str:
+async def create_task(method: str, token: str, params, task_id: str) -> str:
     norm_params = await effects_service.get_optimal_func_zone_data(params, token)
     params_for_hash = await effects_service.build_hash_params(norm_params, token)
     phash = file_cache.params_hash(params_for_hash)
 
     task = AnyTask(
-        method, norm_params.scenario_id, token, norm_params, phash, file_cache
+        method, norm_params.scenario_id, token, norm_params, phash, file_cache, task_id
     )
     _task_map[task.task_id] = task
     await _task_queue.put(task)

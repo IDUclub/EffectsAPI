@@ -760,8 +760,22 @@ class EffectsService:
         prov_df = prov_df.loc[context_ids].copy()
         return blocks[["geometry"]].join(prov_df, how="right")
 
+    async def calculate_provision_totals(
+            self,
+            provision_gdfs_dict: dict[str, gpd.GeoDataFrame],
+            ndigits: int = 2,
+    ) -> dict[str, float | None]:
+        prov_totals: dict[str, float | None] = {}
+        for st_name, prov_gdf in provision_gdfs_dict.items():
+            if prov_gdf.demand.sum() == 0:
+                prov_totals[st_name] = None
+            else:
+                total = float(provision_strong_total(prov_gdf))
+                prov_totals[st_name] = round(total, ndigits)
+        return prov_totals
+
     async def territory_transformation_scenario_before(
-        self, token: str, params: ContextDevelopmentDTO
+        self, token: str, params: ContextDevelopmentDTO, context_blocks: gpd.GeoDataFrame
     ):
         method_name = "territory_transformation"
 
@@ -807,13 +821,6 @@ class EffectsService:
             )
         )
 
-        context_blocks, context_buildings = await self.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
-        )
-
         base_scenario_blocks, base_scenario_buildings = (
             await self.aggregate_blocks_layer_scenario(
                 base_scenario_id, base_src, base_year, token
@@ -823,6 +830,12 @@ class EffectsService:
         before_blocks = pd.concat([context_blocks, base_scenario_blocks]).reset_index(
             drop=True
         )
+
+        if "is_project" not in before_blocks.columns:
+            before_blocks["is_project"] = False
+        else:
+            before_blocks["is_project"] = before_blocks["is_project"].fillna(False).astype(bool)
+
         graph = get_accessibility_graph(before_blocks, "intermodal")
         acc_mx = calculate_accessibility_matrix(before_blocks, graph)
 
@@ -831,15 +844,23 @@ class EffectsService:
             st_name = service_types.loc[st_id, "name"]
             _, demand, accessibility = service_types_config[st_name].values()
             prov_gdf = await self._assess_provision(before_blocks, acc_mx, st_name)
+            prov_gdf = prov_gdf.join(
+                before_blocks[["is_project"]].reindex(prov_gdf.index),
+                how="left"
+            )
+            prov_gdf["is_project"] = prov_gdf["is_project"].fillna(False).astype(bool)
             prov_gdf = prov_gdf.to_crs(4326)
             prov_gdf = prov_gdf.drop(axis="columns", columns="provision_weak")
             prov_gdfs_before[st_name] = prov_gdf
+
+        prov_totals = await self.calculate_provision_totals(prov_gdfs_before)
 
         existing_data = cached["data"] if cached else {}
         existing_data["before"] = {
             name: await gdf_to_ru_fc_rounded(gdf, ndigits=6)
             for name, gdf in prov_gdfs_before.items()
         }
+        existing_data["before"]["provision_total_before"] = prov_totals
 
         self.cache.save(
             method_name,
@@ -886,7 +907,7 @@ class EffectsService:
         return facade
 
     async def territory_transformation_scenario_after(
-        self, token, params: ContextDevelopmentDTO | DevelopmentDTO
+        self, token, params: ContextDevelopmentDTO | DevelopmentDTO, context_blocks: gpd.GeoDataFrame
     ):
         # provision after
         method_name = "territory_transformation"
@@ -924,12 +945,12 @@ class EffectsService:
             ~service_types["infrastructure_type"].isna()
         ].copy()
 
-        context_blocks, _ = await self.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
-        )
+        # context_blocks, _ = await self.aggregate_blocks_layer_context(
+        #     params.scenario_id,
+        #     params.context_func_zone_source,
+        #     params.context_func_source_year,
+        #     token,
+        # )
 
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,
@@ -975,7 +996,7 @@ class EffectsService:
             num_params=facade.num_params,
             facade=facade,
             weights=services_weights,
-            max_evals=30,
+            max_evals=25,
         )
         constraints = WeightedConstraints(num_params=facade.num_params, facade=facade)
         tpe_optimizer = TPEOptimizer(
@@ -985,7 +1006,7 @@ class EffectsService:
         )
 
         best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=30, timeout=60000, initial_runs_num=1
+            max_runs=25, timeout=60000, initial_runs_num=1
         )
 
         prov_gdfs_after = {}
@@ -994,16 +1015,23 @@ class EffectsService:
             if st_name in facade._chosen_service_types:
                 prov_df = facade._provision_adapter.get_last_provision_df(st_name)
                 prov_gdf = (
-                    after_blocks[["geometry"]]
+                    after_blocks[["geometry", "is_project"]]
                     .join(prov_df, how="left")
-                    .to_crs(4326)
                     .drop(columns="provision_weak", errors="ignore")
                 )
-                num_cols = prov_gdf.select_dtypes(include="number").columns
-                prov_gdf[num_cols] = prov_gdf[num_cols].fillna(0)
-                prov_gdfs_after[st_name] = gpd.GeoDataFrame(
-                    prov_gdf, geometry="geometry", crs="EPSG:4326"
-                )
+
+                if getattr(prov_gdf, "crs", None) is None:
+                    prov_gdf = gpd.GeoDataFrame(prov_gdf, geometry="geometry", crs=after_blocks.crs)
+                prov_gdf = prov_gdf.to_crs(4326)
+
+                prov_gdf["is_project"] = prov_gdf["is_project"].fillna(False).astype(bool)
+                num_cols = [c for c in prov_gdf.select_dtypes(include=["number"]).columns if c != "is_project"]
+                if num_cols:
+                    prov_gdf[num_cols] = prov_gdf[num_cols].fillna(0)
+
+                prov_gdfs_after[st_name] = gpd.GeoDataFrame(prov_gdf, geometry="geometry", crs="EPSG:4326")
+
+        prov_totals = await self.calculate_provision_totals(prov_gdfs_after)
 
         from_cache = cached["data"] if cached else {}
         from_cache["after"] = {
@@ -1013,6 +1041,7 @@ class EffectsService:
         from_cache["opt_context"] = {
             "best_x": best_x,
         }
+        from_cache["after"]["provision_total_after"] = prov_totals
 
         self.cache.save(
             method_name,
@@ -1034,7 +1063,13 @@ class EffectsService:
         is_based = info["is_based"]
         updated_at = info["updated_at"]
 
-        prov_before = await self.territory_transformation_scenario_before(token, params)
+        context_blocks, _ = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
+        )
+        prov_before = await self.territory_transformation_scenario_before(token, params, context_blocks)
         if is_based:
             return prov_before
 
@@ -1053,7 +1088,7 @@ class EffectsService:
             }
             return {"before": prov_before, "after": prov_after}
 
-        prov_after = await self.territory_transformation_scenario_after(token, params)
+        prov_after = await self.territory_transformation_scenario_after(token, params, context_blocks)
         return {"before": prov_before, "after": prov_after}
 
     async def values_transformation(
@@ -1071,6 +1106,13 @@ class EffectsService:
         info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
         updated_at = info["updated_at"]
 
+        context_blocks, _ = await self.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
+        )
+
         cached = self.cache.load(method_name, params.scenario_id, phash)
 
         need_refresh = (
@@ -1080,17 +1122,11 @@ class EffectsService:
             or "best_x" not in cached["data"]["opt_context"]
         )
         if need_refresh:
-            await self.territory_transformation_scenario_after(token, params)
+            await self.territory_transformation_scenario_after(token, params, context_blocks)
             cached = self.cache.load(method_name, params.scenario_id, phash)
 
         best_x = cached["data"]["opt_context"]["best_x"]
 
-        context_blocks, _ = await self.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
-        )
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,
             params.proj_func_zone_source,
