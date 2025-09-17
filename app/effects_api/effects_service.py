@@ -26,6 +26,7 @@ from blocksnet.relations import (
     get_accessibility_graph,
 )
 from loguru import logger
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from app.effects_api.modules.scenario_service import ScenarioService
@@ -821,7 +822,10 @@ class EffectsService:
         before_blocks = pd.concat([context_blocks, base_scenario_blocks]).reset_index(
             drop=True
         )
-        graph = get_accessibility_graph(before_blocks, "intermodal")
+        before_blocks_area = before_blocks.to_crs(4326)
+        merged = unary_union(before_blocks_area.geometry)
+        graph = await self.graph_api_client.get_graph("intermodal", geometry=merged)
+        # graph = get_accessibility_graph(before_blocks, "intermodal")
         acc_mx = calculate_accessibility_matrix(before_blocks, graph)
 
         prov_gdfs_before = {}
@@ -936,7 +940,10 @@ class EffectsService:
         after_blocks["is_project"] = (
             after_blocks["is_project"].fillna(False).astype(bool)
         )
-        graph = get_accessibility_graph(after_blocks, "intermodal")
+
+        after_blocks_area = after_blocks.to_crs(4326)
+        merged = unary_union(after_blocks_area.geometry)
+        graph = await self.graph_api_client.get_graph("intermodal", geometry=merged)
         acc_mx = calculate_accessibility_matrix(after_blocks, graph)
 
         service_types["infrastructure_weight"] = (

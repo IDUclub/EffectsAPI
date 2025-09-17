@@ -126,7 +126,7 @@ class JSONAPIHandler:
         endpoint_url: str,
         headers: dict | None = None,
         params: dict | None = None,
-        data: dict | None = None,
+        json: dict | None = None,
         session: aiohttp.ClientSession | None = None,
     ) -> dict | list:
         """Function to post data from api
@@ -134,7 +134,7 @@ class JSONAPIHandler:
             endpoint_url (str): Endpoint url
             headers (dict | None): Headers
             params (dict | None): Query parameters
-            data (dict | None): Request data
+            json (dict | None): Request data
             session (aiohttp.ClientSession | None): Session to use
         Returns:
             dict | list: Response data as python object
@@ -146,7 +146,7 @@ class JSONAPIHandler:
                     endpoint_url=endpoint_url,
                     headers=headers,
                     params=params,
-                    data=data,
+                    json=json,
                     session=session,
                 )
         url = self.base_url + endpoint_url
@@ -155,7 +155,7 @@ class JSONAPIHandler:
             url=url,
             headers=headers,
             params=params,
-            data=data,
+            json=json,
         ) as response:
             result = await self._check_response_status(response)
             if not result:
@@ -163,7 +163,7 @@ class JSONAPIHandler:
                     endpoint_url=endpoint_url,
                     headers=headers,
                     params=params,
-                    data=data,
+                    json=json,
                     session=session,
                 )
             return result
