@@ -114,5 +114,7 @@ class FileCache:
         else:
             phash = self.params_hash(tail)
 
-        scenario_id = int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        scenario_id = (
+            int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        )
         return method, scenario_id, phash

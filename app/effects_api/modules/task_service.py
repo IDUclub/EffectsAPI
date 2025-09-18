@@ -31,7 +31,7 @@ class AnyTask:
         params: Any,
         params_hash: str,
         cache: file_cache,
-        task_id: str
+        task_id: str,
     ):
         self.method = method
         self.scenario_id = scenario_id

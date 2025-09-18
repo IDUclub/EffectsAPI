@@ -62,7 +62,7 @@ async def create_task(
         params_filled,
         params_for_hash,
         file_cache,
-        task_id
+        task_id,
     )
     _task_map[task_id] = task
     await _task_queue.put(task)
@@ -86,7 +86,12 @@ async def task_status(task_id: str):
         return {
             "task_id": task_id,
             "status": getattr(task, "status", "unknown"),
-            **({"error": str(task.error)} if getattr(task, "status", None) == "failed" and getattr(task, "error", None) else {})
+            **(
+                {"error": str(task.error)}
+                if getattr(task, "status", None) == "failed"
+                and getattr(task, "error", None)
+                else {}
+            ),
         }
 
     raise http_exception(404, "task not found", task_id)
@@ -108,18 +113,42 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
 
     data: dict = cached["data"]
 
-    if "after" not in data:
-        fc = data["before"].get(service_name)
+    if "after" not in data or not data.get("after"):
+        fc = data.get("before", {}).get(service_name)
         if not fc:
             raise http_exception(404, f"service '{service_name}' not found")
         return JSONResponse(content=fc)
 
-    fc_before = data["before"].get(service_name)
-    fc_after = data["after"].get(service_name)
-    if not (fc_before and fc_after):
-        raise http_exception(404, f"service '{service_name}' not found")
+    before_dict = data.get("before", {}) or {}
+    after_dict = data.get("after", {}) or {}
 
-    return JSONResponse(content={"before": fc_before, "after": fc_after})
+    fc_before = before_dict.get(service_name)
+    fc_after = after_dict.get(service_name)
+
+    provision_before = before_dict.get("provision_total_before")
+    provision_after = after_dict.get("provision_total_after")
+
+    if fc_before and fc_after:
+        return JSONResponse(
+            content={
+                "before": fc_before,
+                "after": fc_after,
+                "provision_total_before": provision_before,
+                "provision_total_after": provision_after,
+            }
+        )
+
+    elif fc_before and not fc_after:
+        return JSONResponse(
+            content={"before": fc_before, "provision_total_before": provision_before}
+        )
+
+    elif fc_after and not fc_before:
+        return JSONResponse(
+            content={"after": fc_after, "provision_total_after": provision_after}
+        )
+
+    raise http_exception(404, f"service '{service_name}' not found")
 
 
 @router.get("/values_oriented_requirements/{scenario_id}/{service_name}")

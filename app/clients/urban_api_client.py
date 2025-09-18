@@ -30,6 +30,10 @@ class UrbanAPIClient:
             params=params,
         )
         features = res["features"]
+        if not features:
+            raise http_exception(
+                404, f"Physical objects needed for calculations are not found", params
+            )
         return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
             "physical_object_id"
         )

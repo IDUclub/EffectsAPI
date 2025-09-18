@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 
 from app.common.auth.auth import verify_token
 
+from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -79,7 +80,7 @@ async def territory_transformation(
 
 @f_26_router.get("/values_development")
 async def values_development(
-    params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
+    params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
     token: str = Depends(verify_token),
 ):
     return await effects_service.values_transformation(token, params)

@@ -25,6 +25,7 @@ from blocksnet.relations import (
     get_accessibility_context,
     get_accessibility_graph,
 )
+from iduedu import config
 from loguru import logger
 
 from app.effects_api.modules.scenario_service import ScenarioService
@@ -34,7 +35,7 @@ from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, round_coords
 from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -57,6 +58,8 @@ from .schemas.socio_economic_response_schema import (
     SocioEconomicResponseSchema,
     SocioEconomicSchema,
 )
+
+config.change_logger_lvl("DEBUG")
 
 
 class EffectsService:
@@ -761,9 +764,9 @@ class EffectsService:
         return blocks[["geometry"]].join(prov_df, how="right")
 
     async def calculate_provision_totals(
-            self,
-            provision_gdfs_dict: dict[str, gpd.GeoDataFrame],
-            ndigits: int = 2,
+        self,
+        provision_gdfs_dict: dict[str, gpd.GeoDataFrame],
+        ndigits: int = 2,
     ) -> dict[str, float | None]:
         prov_totals: dict[str, float | None] = {}
         for st_name, prov_gdf in provision_gdfs_dict.items():
@@ -775,7 +778,10 @@ class EffectsService:
         return prov_totals
 
     async def territory_transformation_scenario_before(
-        self, token: str, params: ContextDevelopmentDTO, context_blocks: gpd.GeoDataFrame
+        self,
+        token: str,
+        params: ContextDevelopmentDTO,
+        context_blocks: gpd.GeoDataFrame = None,
     ):
         method_name = "territory_transformation"
 
@@ -834,7 +840,9 @@ class EffectsService:
         if "is_project" not in before_blocks.columns:
             before_blocks["is_project"] = False
         else:
-            before_blocks["is_project"] = before_blocks["is_project"].fillna(False).astype(bool)
+            before_blocks["is_project"] = (
+                before_blocks["is_project"].fillna(False).astype(bool)
+            )
 
         graph = get_accessibility_graph(before_blocks, "intermodal")
         acc_mx = calculate_accessibility_matrix(before_blocks, graph)
@@ -845,8 +853,7 @@ class EffectsService:
             _, demand, accessibility = service_types_config[st_name].values()
             prov_gdf = await self._assess_provision(before_blocks, acc_mx, st_name)
             prov_gdf = prov_gdf.join(
-                before_blocks[["is_project"]].reindex(prov_gdf.index),
-                how="left"
+                before_blocks[["is_project"]].reindex(prov_gdf.index), how="left"
             )
             prov_gdf["is_project"] = prov_gdf["is_project"].fillna(False).astype(bool)
             prov_gdf = prov_gdf.to_crs(4326)
@@ -907,7 +914,10 @@ class EffectsService:
         return facade
 
     async def territory_transformation_scenario_after(
-        self, token, params: ContextDevelopmentDTO | DevelopmentDTO, context_blocks: gpd.GeoDataFrame
+        self,
+        token,
+        params: ContextDevelopmentDTO | DevelopmentDTO,
+        context_blocks: gpd.GeoDataFrame,
     ):
         # provision after
         method_name = "territory_transformation"
@@ -1021,15 +1031,25 @@ class EffectsService:
                 )
 
                 if getattr(prov_gdf, "crs", None) is None:
-                    prov_gdf = gpd.GeoDataFrame(prov_gdf, geometry="geometry", crs=after_blocks.crs)
+                    prov_gdf = gpd.GeoDataFrame(
+                        prov_gdf, geometry="geometry", crs=after_blocks.crs
+                    )
                 prov_gdf = prov_gdf.to_crs(4326)
 
-                prov_gdf["is_project"] = prov_gdf["is_project"].fillna(False).astype(bool)
-                num_cols = [c for c in prov_gdf.select_dtypes(include=["number"]).columns if c != "is_project"]
+                prov_gdf["is_project"] = (
+                    prov_gdf["is_project"].fillna(False).astype(bool)
+                )
+                num_cols = [
+                    c
+                    for c in prov_gdf.select_dtypes(include=["number"]).columns
+                    if c != "is_project"
+                ]
                 if num_cols:
                     prov_gdf[num_cols] = prov_gdf[num_cols].fillna(0)
 
-                prov_gdfs_after[st_name] = gpd.GeoDataFrame(prov_gdf, geometry="geometry", crs="EPSG:4326")
+                prov_gdfs_after[st_name] = gpd.GeoDataFrame(
+                    prov_gdf, geometry="geometry", crs="EPSG:4326"
+                )
 
         prov_totals = await self.calculate_provision_totals(prov_gdfs_after)
 
@@ -1069,7 +1089,9 @@ class EffectsService:
             params.context_func_source_year,
             token,
         )
-        prov_before = await self.territory_transformation_scenario_before(token, params, context_blocks)
+        prov_before = await self.territory_transformation_scenario_before(
+            token, params, context_blocks
+        )
         if is_based:
             return prov_before
 
@@ -1088,15 +1110,16 @@ class EffectsService:
             }
             return {"before": prov_before, "after": prov_after}
 
-        prov_after = await self.territory_transformation_scenario_after(token, params, context_blocks)
+        prov_after = await self.territory_transformation_scenario_after(
+            token, params, context_blocks
+        )
         return {"before": prov_before, "after": prov_after}
 
     async def values_transformation(
         self,
         token: str,
         params: TerritoryTransformationDTO,
-    ) -> pd.DataFrame:
-
+    ) -> dict:
         method_name = "territory_transformation"
         params = await self.get_optimal_func_zone_data(params, token)
 
@@ -1114,7 +1137,6 @@ class EffectsService:
         )
 
         cached = self.cache.load(method_name, params.scenario_id, phash)
-
         need_refresh = (
             not cached
             or cached["meta"]["scenario_updated_at"] != updated_at
@@ -1122,7 +1144,9 @@ class EffectsService:
             or "best_x" not in cached["data"]["opt_context"]
         )
         if need_refresh:
-            await self.territory_transformation_scenario_after(token, params, context_blocks)
+            await self.territory_transformation_scenario_after(
+                token, params, context_blocks
+            )
             cached = self.cache.load(method_name, params.scenario_id, phash)
 
         best_x = cached["data"]["opt_context"]["best_x"]
@@ -1133,12 +1157,30 @@ class EffectsService:
             params.proj_func_source_year,
             token,
         )
-        after_blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(
-            drop=True
-        )
-        after_blocks["is_project"] = (
-            after_blocks["is_project"].fillna(False).astype(bool)
-        )
+
+        after_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=False)
+        if "block_id" in after_blocks.columns:
+            after_blocks["block_id"] = after_blocks["block_id"].astype(int)
+            if after_blocks.index.name == "block_id":
+                after_blocks = after_blocks.reset_index(drop=True)
+            after_blocks = (
+                after_blocks.drop_duplicates(subset="block_id", keep="last")
+                .set_index("block_id")
+                .sort_index()
+            )
+        else:
+            after_blocks.index = after_blocks.index.astype(int)
+            after_blocks = after_blocks[
+                ~after_blocks.index.duplicated(keep="last")
+            ].sort_index()
+        after_blocks.index.name = "block_id"
+
+        if "is_project" in after_blocks.columns:
+            after_blocks["is_project"] = (
+                after_blocks["is_project"].fillna(False).astype(bool)
+            )
+        else:
+            after_blocks["is_project"] = False
 
         graph = get_accessibility_graph(after_blocks, "intermodal")
         acc_mx = calculate_accessibility_matrix(after_blocks, graph)
@@ -1154,20 +1196,97 @@ class EffectsService:
         )
 
         facade = self._build_facade(after_blocks, acc_mx, service_types)
+        test_blocks: gpd.GeoDataFrame = after_blocks.loc[
+            list(facade._blocks_lu.keys())
+        ].copy()
+        test_blocks.index = test_blocks.index.astype(int)
 
-        solution_df = facade.solution_to_services_df(best_x)
+        solution_df = facade.solution_to_services_df(best_x).copy()
+        solution_df["block_id"] = solution_df["block_id"].astype(int)
+        metrics = [
+            c
+            for c in ["site_area", "build_floor_area", "capacity", "count"]
+            if c in solution_df.columns
+        ]
+        zero_dict = {m: 0 for m in metrics}
 
-        result = json.loads(solution_df.to_json(orient="records", date_format="iso"))
-        return result
+        if len(metrics):
+            agg = (
+                solution_df.groupby(["block_id", "service_type"])[metrics]
+                .sum()
+                .sort_index()
+            )
+        else:
+            agg = (
+                solution_df.groupby(["block_id", "service_type"])
+                .size()
+                .to_frame(name="__dummy__")
+                .drop(columns="__dummy__")
+            )
+
+        def _row_to_dict(s: pd.Series) -> dict:
+            d = {m: (0 if pd.isna(s.get(m)) else s.get(m)) for m in metrics}
+            for k, v in d.items():
+                try:
+                    fv = float(v)
+                    d[k] = int(fv) if fv.is_integer() else fv
+                except Exception:
+                    pass
+            return d
+
+        if len(metrics):
+            cells = agg.apply(_row_to_dict, axis=1)
+        else:
+            cells = agg.apply(lambda _: {}, axis=1)
+
+        wide = cells.unstack("service_type")
+        wide = wide.reindex(index=test_blocks.index)
+
+        all_services = sorted(solution_df["service_type"].dropna().unique().tolist())
+        for s in all_services:
+            if s not in wide.columns:
+                wide[s] = np.nan
+
+        def _fill_cell(x):
+            if isinstance(x, dict):
+                return x
+            return zero_dict.copy()
+
+        wide = wide.applymap(_fill_cell)
+        wide = wide[all_services]
+        test_blocks_with_services: gpd.GeoDataFrame = test_blocks.join(wide, how="left")
+
+        logger.info("Values transformed complete")
+
+        geom_col = test_blocks_with_services.geometry.name
+        service_cols = all_services
+        base_cols = [
+            c for c in ["is_project"] if c in test_blocks_with_services.columns
+        ]
+
+        gdf_out = test_blocks_with_services[base_cols + service_cols + [geom_col]]
+        gdf_out = gdf_out.to_crs(crs="EPSG:4326")
+        gdf_out.geometry = round_coords(gdf_out.geometry, 6)
+        geojson = json.loads(gdf_out.to_json())
+
+        self.cache.save(
+            "values_transformation",
+            params.scenario_id,
+            params_for_hash,
+            geojson,
+            scenario_updated_at=updated_at,
+        )
+
+        return geojson
 
     def _get_value_level(self, provisions: list[float | None]) -> float:
         vals = [p for p in provisions if p is not None]
         return float(np.mean(vals)) if vals else np.nan
 
     async def values_oriented_requirements(
-            self,
-            token: str,
-            params: TerritoryTransformationDTO,
+        self,
+        token: str,
+        params: TerritoryTransformationDTO,
     ):
         method_name = "values_oriented_requirements"
 
@@ -1207,7 +1326,9 @@ class EffectsService:
         scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
 
         cap_cols = [c for c in scenario_blocks.columns if c.startswith("capacity_")]
-        scenario_blocks.loc[scenario_blocks["is_project"], ["population"] + cap_cols] = 0
+        scenario_blocks.loc[
+            scenario_blocks["is_project"], ["population"] + cap_cols
+        ] = 0
         if "capacity" in scenario_blocks.columns:
             scenario_blocks = scenario_blocks.drop(columns="capacity")
 
@@ -1224,14 +1345,22 @@ class EffectsService:
         acc_mx = calculate_accessibility_matrix(blocks, graph)
 
         prov_gdfs: dict[str, gpd.GeoDataFrame] = {}
-        if cached and cached["meta"].get("scenario_updated_at") == updated_at and "provision" in cached["data"]:
+        if (
+            cached
+            and cached["meta"].get("scenario_updated_at") == updated_at
+            and "provision" in cached["data"]
+        ):
             for st_name, fc in cached["data"]["provision"].items():
-                prov_gdfs[st_name] = gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
+                prov_gdfs[st_name] = gpd.GeoDataFrame.from_features(
+                    fc["features"], crs="EPSG:4326"
+                )
         else:
             for st_id in service_types.index:
                 st_name = service_types.loc[st_id, "name"]
                 prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
-                prov_gdf = prov_gdf.to_crs(4326).drop(columns="provision_weak", errors="ignore")
+                prov_gdf = prov_gdf.to_crs(4326).drop(
+                    columns="provision_weak", errors="ignore"
+                )
                 num_cols = prov_gdf.select_dtypes(include="number").columns
                 prov_gdf[num_cols] = prov_gdf[num_cols].fillna(0)
                 prov_gdfs[st_name] = prov_gdf
@@ -1285,4 +1414,3 @@ class EffectsService:
         )
 
         return result_df
-
