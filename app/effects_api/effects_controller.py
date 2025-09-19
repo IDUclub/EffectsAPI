@@ -79,7 +79,7 @@ async def territory_transformation(
 
 @f_26_router.get("/values_development")
 async def values_development(
-    params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
+    params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
     token: str = Depends(verify_token),
 ):
     return await effects_service.values_transformation(token, params)

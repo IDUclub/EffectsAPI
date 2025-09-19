@@ -6,6 +6,7 @@ from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
 from blocksnet.preprocessing.imputing import impute_buildings, impute_services
 
 from app.clients.urban_api_client import UrbanAPIClient
+from app.common.exceptions.http_exception_wrapper import http_exception
 from app.common.utils.geodata import get_best_functional_zones_source
 from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID
 from app.effects_api.modules.buildings_service import adapt_buildings
@@ -112,6 +113,8 @@ async def get_context_buildings(scenario_id: int, token: str, client: UrbanAPICl
         physical_object_type_id=LIVING_BUILDINGS_ID,
         centers_only=True,
     )
+    if gdf is None or gdf.empty:
+        raise http_exception(404, "No living buildings found for given scenario")
     gdf = adapt_buildings(gdf.reset_index(drop=True))
     crs = gdf.estimate_utm_crs()
     return impute_buildings(gdf.to_crs(crs)).to_crs(4326)

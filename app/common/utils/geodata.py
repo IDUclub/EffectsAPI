@@ -4,7 +4,7 @@ import json
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry.base import BaseGeometry
-from shapely.wkt import loads, dumps
+from shapely.wkt import dumps, loads
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.effects_api.constants.const import COL_RU
@@ -21,7 +21,9 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
     gdf = gdf.to_crs(4326)
 
     gdf_copy = gdf.copy()
-    gdf_copy.geometry = await asyncio.to_thread(round_coords, gdf_copy.geometry, ndigits)
+    gdf_copy.geometry = await asyncio.to_thread(
+        round_coords, gdf_copy.geometry, ndigits
+    )
 
     return json.loads(gdf_copy.to_json(drop_id=True))
 
@@ -29,9 +31,9 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
 def fc_to_gdf(fc: dict) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
 
+
 def round_coords(
-    geometry: gpd.GeoSeries | BaseGeometry,
-    ndigits: int = 6
+    geometry: gpd.GeoSeries | BaseGeometry, ndigits: int = 6
 ) -> gpd.GeoSeries | BaseGeometry:
     if isinstance(geometry, gpd.GeoSeries):
         return geometry.map(lambda geom: loads(dumps(geom, rounding_precision=ndigits)))

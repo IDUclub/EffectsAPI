@@ -29,7 +29,6 @@ class JSONAPIHandler:
             return await response.json(content_type="application/json")
 
         elif response.status == 500:
-            # определим тип контента по заголовку
             content_type = (response.headers.get("Content-Type") or "").lower()
 
             if "application/json" in content_type:

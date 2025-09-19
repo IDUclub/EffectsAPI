@@ -104,8 +104,15 @@ class FileCache:
         parts = task_id.split("_")
         if len(parts) < 3:
             return None, None, None
-        phash = parts[-1]
+
+        tail = parts[-1]
         scenario_id_raw = parts[-2]
         method = "_".join(parts[:-2])
+
+        if len(tail) == 8 and tail.lower().strip("0123456789abcdef") == "":
+            phash = tail
+        else:
+            phash = self.params_hash(tail)
+
         scenario_id = int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
         return method, scenario_id, phash

@@ -22,17 +22,19 @@ class UrbanAPIClient:
         scenario_id: int,
         token: str,
         **params: Any,
-    ) -> gpd.GeoDataFrame:
-        headers = {"Authorization": f"Bearer {token}"}
+    ) -> gpd.GeoDataFrame | None:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
-            headers=headers,
+            headers={"Authorization": f"Bearer {token}"},
             params=params,
         )
-        features = res["features"]
-        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
-            "physical_object_id"
-        )
+        features = (res or {}).get("features") or []
+        if not features:
+            return None
+        else:
+            return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+                "physical_object_id"
+            )
 
     async def get_services(
         self, scenario_id: int, token: str, **kwargs: Any

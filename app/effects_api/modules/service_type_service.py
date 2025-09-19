@@ -8,6 +8,13 @@ from app.clients.urban_api_client import UrbanAPIClient
 from app.common.caching.caching_service import FileCache
 from app.effects_api.constants.const import SERVICE_TYPES_MAPPING
 
+_SOCIAL_VALUES_BY_ST: Dict[int, Optional[List[int]]] = {}
+_SOCIAL_VALUES_LOCK = asyncio.Lock()
+_SERVICE_NAME_TO_ID: dict[str, int] = {
+    name: sid for sid, name in SERVICE_TYPES_MAPPING.items()
+}
+_VALID_SERVICE_NAMES: set[str] = set(_SERVICE_NAME_TO_ID.keys())
+
 for st_id, st_name in SERVICE_TYPES_MAPPING.items():
     if st_name is None:
         continue
@@ -16,10 +23,6 @@ for st_id, st_name in SERVICE_TYPES_MAPPING.items():
 
 async def _adapt_name(service_type_id: int) -> Optional[str]:
     return SERVICE_TYPES_MAPPING.get(service_type_id)
-
-
-_SOCIAL_VALUES_BY_ST: Dict[int, Optional[List[int]]] = {}
-_SOCIAL_VALUES_LOCK = asyncio.Lock()
 
 
 async def _warmup_social_values(
@@ -64,44 +67,42 @@ async def adapt_service_types(
     return df[["name", "infrastructure_type", "infrastructure_weight", "social_values"]]
 
 
+def _map_services(names: list[str]) -> list[dict]:
+    out = []
+    get_id = _SERVICE_NAME_TO_ID.get
+    for n in names:
+        sid = get_id(n)
+        out.append({"id": sid, "name": n})
+    return out
+
+
+def _filter_service_keys(d: dict | None) -> list[str]:
+    if not isinstance(d, dict):
+        return []
+    return [k for k in d.keys() if k in _VALID_SERVICE_NAMES]
+
+
 async def get_services_with_ids_from_layer(
     scenario_id: int,
     method: str,
     cache: FileCache,
 ) -> dict:
-    cached: Optional[dict] = cache.load_latest(method, scenario_id)
+    cached: dict | None = cache.load_latest(method, scenario_id)
     if not cached or "data" not in cached:
         return {"before": [], "after": []}
 
-    data = cached["data"]
-
-    def map_services(names: List[str]):
-        result = []
-        for name in names:
-            matched = [
-                {"id": sid, "name": sname}
-                for sid, sname in SERVICE_TYPES_MAPPING.items()
-                if sname == name
-            ]
-            if matched:
-                result.extend(matched)
-            else:
-                result.append({"id": None, "name": name})
-        return result
+    data: dict = cached["data"]
 
     if "before" in data or "after" in data:
-        before_names = list(data.get("before", {}).keys())
-        after_names = list(data.get("after", {}).keys())
+        before_names = _filter_service_keys(data.get("before"))
+        after_names = _filter_service_keys(data.get("after"))
         return {
-            "before": map_services(before_names),
-            "after": map_services(after_names),
+            "before": _map_services(before_names),
+            "after": _map_services(after_names),
         }
 
     if "provision" in data:
-        prov_names = list(data["provision"].keys())
-        return {
-            "services": map_services(prov_names)
-        }
+        prov_names = _filter_service_keys(data["provision"])
+        return {"services": _map_services(prov_names)}
 
     return {"before": [], "after": []}
-
