@@ -7,7 +7,6 @@ import shapely
 from loguru import logger
 
 from app.common.api_handlers.json_api_handler import JSONAPIHandler
-from app.common.exceptions.errors import NoFeaturesError, UpstreamApiError
 from app.common.exceptions.http_exception_wrapper import http_exception
 
 
@@ -23,23 +22,19 @@ class UrbanAPIClient:
         scenario_id: int,
         token: str,
         **params: Any,
-    ) -> gpd.GeoDataFrame:
-        try:
-            res = await self.json_handler.get(
-                f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
-                headers={"Authorization": f"Bearer {token}"},
-                params=params,
-            )
-        except Exception as e:
-            raise UpstreamApiError("Urban API request failed") from e
-
+    ) -> gpd.GeoDataFrame | None:
+        res = await self.json_handler.get(
+            f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+        )
         features = (res or {}).get("features") or []
         if not features:
-            raise NoFeaturesError("No physical objects to process")
-
-        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
-            "physical_object_id"
-        )
+            return None
+        else:
+            return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
+                "physical_object_id"
+            )
 
     async def get_services(
         self, scenario_id: int, token: str, **kwargs: Any
