@@ -36,7 +36,7 @@ from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, round_coords
-from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES
+from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES, MAX_EVALS, MAX_RUNS
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
@@ -997,7 +997,7 @@ class EffectsService:
             num_params=facade.num_params,
             facade=facade,
             weights=services_weights,
-            max_evals=25,
+            max_evals=MAX_EVALS,
         )
         constraints = WeightedConstraints(num_params=facade.num_params, facade=facade)
         tpe_optimizer = TPEOptimizer(
@@ -1007,7 +1007,7 @@ class EffectsService:
         )
 
         best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=25, timeout=60000, initial_runs_num=1
+            max_runs=MAX_RUNS, timeout=60000, initial_runs_num=1
         )
 
         prov_gdfs_after = {}

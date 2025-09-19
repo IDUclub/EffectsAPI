@@ -133,3 +133,9 @@ ROADS_ID = 26
 
 # ID of water objects physical_object_function_id
 WATER_ID = 4
+
+#Maximum number of function evaluations
+MAX_EVALS = 25
+
+#Maximum number of runs for optimization
+MAX_RUNS = 25
