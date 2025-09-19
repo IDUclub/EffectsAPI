@@ -138,12 +138,12 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
             }
         )
 
-    elif fc_before and not fc_after:
+    if fc_before and not fc_after:
         return JSONResponse(
             content={"before": fc_before, "provision_total_before": provision_before}
         )
 
-    elif fc_after and not fc_before:
+    if fc_after and not fc_before:
         return JSONResponse(
             content={"after": fc_after, "provision_total_after": provision_after}
         )

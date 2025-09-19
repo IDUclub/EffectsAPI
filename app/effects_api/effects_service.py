@@ -59,8 +59,6 @@ from .schemas.socio_economic_response_schema import (
     SocioEconomicSchema,
 )
 
-config.change_logger_lvl("DEBUG")
-
 
 class EffectsService:
     def __init__(
@@ -954,13 +952,6 @@ class EffectsService:
         service_types = service_types[
             ~service_types["infrastructure_type"].isna()
         ].copy()
-
-        # context_blocks, _ = await self.aggregate_blocks_layer_context(
-        #     params.scenario_id,
-        #     params.context_func_zone_source,
-        #     params.context_func_source_year,
-        #     token,
-        # )
 
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,

@@ -39,7 +39,6 @@ class AnyTask:
         self.params = params
         self.param_hash = params_hash
 
-        # self.task_id = f"{method}_{scenario_id}_{self.param_hash}"
         self.status: Literal["queued", "running", "done", "failed"] = "queued"
         self.result: dict | None = None
         self.error: str | None = None

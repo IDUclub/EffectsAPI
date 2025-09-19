@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 
+from app.common.exceptions.errors import NoFeaturesError, UpstreamApiError
 from app.common.exceptions.exception_handler import ExceptionHandlerMiddleware
 from app.effects_api.effects_controller import (
     development_router,
@@ -24,9 +25,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.exception_handler(NoFeaturesError)
+async def _handle_no_features(request, exc):
+    raise HTTPException(status_code=404, detail="Physical objects not found")
+
+
+@app.exception_handler(UpstreamApiError)
+async def _handle_upstream(request, exc):
+    raise HTTPException(status_code=502, detail="Upstream API error")
+
+
 origins = ["*"]
 
-# disable cors
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,

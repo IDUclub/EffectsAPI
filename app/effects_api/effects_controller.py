@@ -7,7 +7,6 @@ from starlette.responses import JSONResponse
 
 from app.common.auth.auth import verify_token
 
-from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service
 from .dto.development_dto import (
     ContextDevelopmentDTO,
