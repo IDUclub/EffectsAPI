@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter
@@ -18,6 +19,16 @@ from .dto.development_dto import ContextDevelopmentDTO
 from .modules.service_type_service import get_services_with_ids_from_layer
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_lock(key: str) -> asyncio.Lock:
+    lock = _locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _locks[key] = lock
+    return lock
 
 
 async def _with_defaults(
@@ -41,33 +52,42 @@ async def create_task(
     if method not in TASK_METHODS:
         raise http_exception(404, f"method '{method}' is not registered", method)
 
-    params_filled = await effects_service.get_optimal_func_zone_data(params, token)
+    coarse_key = f"{method}:{params.scenario_id}"
+    lock = _get_lock(coarse_key)
 
-    params_for_hash = await effects_service.build_hash_params(params_filled, token)
-    phash = file_cache.params_hash(params_for_hash)
+    async with lock:
+        params_filled = await effects_service.get_optimal_func_zone_data(params, token)
+        params_for_hash = await effects_service.build_hash_params(params_filled, token)
+        phash = file_cache.params_hash(params_for_hash)
 
-    task_id = f"{method}_{params_filled.scenario_id}_{phash}"
+        task_id = f"{method}_{params_filled.scenario_id}_{phash}"
 
-    if file_cache.load(method, params_filled.scenario_id, phash):
-        return {"task_id": task_id, "status": "done"}
+        cached = file_cache.load(method, params_filled.scenario_id, phash)
+        if cached:
+            data = cached.get("data") or {}
+            cache_complete = True
+            if method == "territory_transformation":
+                cache_complete = bool(data.get("after"))
+            if cache_complete:
+                return {"task_id": task_id, "status": "done"}
 
-    existing = _task_map.get(task_id)
-    if existing and existing.status in {"queued", "running"}:
-        return {"task_id": task_id, "status": existing.status}
+        existing = _task_map.get(task_id)
+        if existing and existing.status in {"queued", "running"}:
+            return {"task_id": task_id, "status": existing.status}
 
-    task = AnyTask(
-        method,
-        params_filled.scenario_id,
-        token,
-        params_filled,
-        params_for_hash,
-        file_cache,
-        task_id,
-    )
-    _task_map[task_id] = task
-    await _task_queue.put(task)
+        task = AnyTask(
+            method,
+            params_filled.scenario_id,
+            token,
+            params_filled,
+            phash,
+            file_cache,
+            task_id,
+        )
+        _task_map[task_id] = task
+        await _task_queue.put(task)
 
-    return {"task_id": task_id, "status": "queued"}
+        return {"task_id": task_id, "status": "queued"}
 
 
 @router.get("/status/{task_id}")
