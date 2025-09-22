@@ -5,6 +5,6 @@ services:
     ports:
       - 5100:80
     env_file:
-      - .env.development
+      - .env.production
     restart: always
 
