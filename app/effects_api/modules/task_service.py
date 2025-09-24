@@ -58,7 +58,16 @@ class AnyTask:
             self.status = "running"
 
             cached = self.cache.load(self.method, self.scenario_id, self.param_hash)
-            if cached:
+
+            def cache_complete(method: str, cached_obj: dict | None) -> bool:
+                if not cached_obj:
+                    return False
+                data = cached_obj.get("data") or {}
+                if method == "territory_transformation":
+                    return bool(data.get("after"))
+                return True
+
+            if cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
                 self.result = cached["data"]
                 self.status = "done"
