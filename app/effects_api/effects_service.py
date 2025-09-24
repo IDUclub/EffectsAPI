@@ -916,6 +916,7 @@ class EffectsService:
         token,
         params: ContextDevelopmentDTO | DevelopmentDTO,
         context_blocks: gpd.GeoDataFrame,
+        save_cache: bool = True,
     ):
         # provision after
         method_name = "territory_transformation"
@@ -967,7 +968,11 @@ class EffectsService:
         after_blocks["is_project"] = (
             after_blocks["is_project"].fillna(False).astype(bool)
         )
-        graph = get_accessibility_graph(after_blocks, "intermodal")
+        try:
+            graph = get_accessibility_graph(after_blocks, "intermodal")
+        except Exception as e:
+            raise http_exception(500, "Error generating territory graph", _detail=str(e))
+
         acc_mx = calculate_accessibility_matrix(after_blocks, graph)
 
         service_types["infrastructure_weight"] = (
@@ -1054,15 +1059,26 @@ class EffectsService:
         }
         from_cache["after"]["provision_total_after"] = prov_totals
 
-        self.cache.save(
-            method_name,
-            params.scenario_id,
-            params_for_hash,
-            from_cache,
-            scenario_updated_at=updated_at,
-        )
+        payload = {
+            "after": prov_gdfs_after,
+            "opt_context": {"best_x": best_x},
+        }
+        payload["after"]["provision_total_after"] = prov_totals
 
-        return prov_gdfs_after
+        if save_cache:
+            self.cache.save(
+                "territory_transformation",
+                params.scenario_id,
+                params_for_hash,
+                payload,
+                scenario_updated_at=updated_at,
+            )
+
+        return {
+            "best_x": best_x,
+            "prov_totals": prov_totals,
+            "prov_gdfs_after": prov_gdfs_after,
+        }
 
     async def territory_transformation(
         self,
@@ -1107,11 +1123,12 @@ class EffectsService:
         return {"before": prov_before, "after": prov_after}
 
     async def values_transformation(
-        self,
-        token: str,
-        params: TerritoryTransformationDTO,
+            self,
+            token: str,
+            params: TerritoryTransformationDTO,
     ) -> dict:
-        method_name = "territory_transformation"
+        opt_method = "territory_transformation_opt"
+
         params = await self.get_optimal_func_zone_data(params, token)
 
         params_for_hash = await self.build_hash_params(params, token)
@@ -1127,20 +1144,28 @@ class EffectsService:
             token,
         )
 
-        cached = self.cache.load(method_name, params.scenario_id, phash)
+        opt_cached = self.cache.load(opt_method, params.scenario_id, phash)
         need_refresh = (
-            not cached
-            or cached["meta"]["scenario_updated_at"] != updated_at
-            or "opt_context" not in cached["data"]
-            or "best_x" not in cached["data"]["opt_context"]
+                not opt_cached
+                or opt_cached["meta"]["scenario_updated_at"] != updated_at
+                or "best_x" not in opt_cached["data"]
         )
         if need_refresh:
-            await self.territory_transformation_scenario_after(
-                token, params, context_blocks
+            res = await self.territory_transformation_scenario_after(
+                token, params, context_blocks, save_cache=False
             )
-            cached = self.cache.load(method_name, params.scenario_id, phash)
+            best_x_val = res["best_x"]
 
-        best_x = cached["data"]["opt_context"]["best_x"]
+            self.cache.save(
+                opt_method,
+                params.scenario_id,
+                params_for_hash,
+                {"best_x": best_x_val},
+                scenario_updated_at=updated_at,
+            )
+            opt_cached = self.cache.load(opt_method, params.scenario_id, phash)
+
+        best_x = opt_cached["data"]["best_x"]
 
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
             params.scenario_id,
@@ -1161,52 +1186,40 @@ class EffectsService:
             )
         else:
             after_blocks.index = after_blocks.index.astype(int)
-            after_blocks = after_blocks[
-                ~after_blocks.index.duplicated(keep="last")
-            ].sort_index()
+            after_blocks = after_blocks[~after_blocks.index.duplicated(keep="last")].sort_index()
         after_blocks.index.name = "block_id"
 
         if "is_project" in after_blocks.columns:
-            after_blocks["is_project"] = (
-                after_blocks["is_project"].fillna(False).astype(bool)
-            )
+            after_blocks["is_project"] = after_blocks["is_project"].fillna(False).astype(bool)
         else:
             after_blocks["is_project"] = False
 
-        graph = get_accessibility_graph(after_blocks, "intermodal")
+        try:
+            graph = get_accessibility_graph(after_blocks, "intermodal")
+        except Exception as e:
+            raise http_exception(500, "Error generating territory graph", _detail=str(e))
+
         acc_mx = calculate_accessibility_matrix(after_blocks, graph)
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
-        service_types = service_types[
-            ~service_types["infrastructure_type"].isna()
-        ].copy()
+        service_types = service_types[~service_types["infrastructure_type"].isna()].copy()
         service_types["infrastructure_weight"] = (
-            service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
-            * service_types["infrastructure_weight"]
+                service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
+                * service_types["infrastructure_weight"]
         )
 
         facade = self._build_facade(after_blocks, acc_mx, service_types)
-        test_blocks: gpd.GeoDataFrame = after_blocks.loc[
-            list(facade._blocks_lu.keys())
-        ].copy()
+        test_blocks: gpd.GeoDataFrame = after_blocks.loc[list(facade._blocks_lu.keys())].copy()
         test_blocks.index = test_blocks.index.astype(int)
 
         solution_df = facade.solution_to_services_df(best_x).copy()
         solution_df["block_id"] = solution_df["block_id"].astype(int)
-        metrics = [
-            c
-            for c in ["site_area", "build_floor_area", "capacity", "count"]
-            if c in solution_df.columns
-        ]
+        metrics = [c for c in ["site_area", "build_floor_area", "capacity", "count"] if c in solution_df.columns]
         zero_dict = {m: 0 for m in metrics}
 
         if len(metrics):
-            agg = (
-                solution_df.groupby(["block_id", "service_type"])[metrics]
-                .sum()
-                .sort_index()
-            )
+            agg = solution_df.groupby(["block_id", "service_type"])[metrics].sum().sort_index()
         else:
             agg = (
                 solution_df.groupby(["block_id", "service_type"])
@@ -1225,13 +1238,8 @@ class EffectsService:
                     pass
             return d
 
-        if len(metrics):
-            cells = agg.apply(_row_to_dict, axis=1)
-        else:
-            cells = agg.apply(lambda _: {}, axis=1)
-
-        wide = cells.unstack("service_type")
-        wide = wide.reindex(index=test_blocks.index)
+        cells = agg.apply(_row_to_dict, axis=1) if len(metrics) else agg.apply(lambda _: {}, axis=1)
+        wide = cells.unstack("service_type").reindex(index=test_blocks.index)
 
         all_services = sorted(solution_df["service_type"].dropna().unique().tolist())
         for s in all_services:
@@ -1239,9 +1247,7 @@ class EffectsService:
                 wide[s] = np.nan
 
         def _fill_cell(x):
-            if isinstance(x, dict):
-                return x
-            return zero_dict.copy()
+            return x if isinstance(x, dict) else zero_dict.copy()
 
         wide = wide.applymap(_fill_cell)
         wide = wide[all_services]
@@ -1251,9 +1257,7 @@ class EffectsService:
 
         geom_col = test_blocks_with_services.geometry.name
         service_cols = all_services
-        base_cols = [
-            c for c in ["is_project"] if c in test_blocks_with_services.columns
-        ]
+        base_cols = [c for c in ["is_project"] if c in test_blocks_with_services.columns]
 
         gdf_out = test_blocks_with_services[base_cols + service_cols + [geom_col]]
         gdf_out = gdf_out.to_crs(crs="EPSG:4326")
