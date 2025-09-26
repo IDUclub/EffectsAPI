@@ -37,6 +37,23 @@ async def _with_defaults(
     return await effects_service.get_optimal_func_zone_data(dto, token)
 
 
+def _is_fc(x: dict) -> bool:
+    return isinstance(x, dict) and x.get("type") == "FeatureCollection" and isinstance(x.get("features"), list)
+
+
+def _section_ready(sec: dict | None) -> bool:
+    return isinstance(sec, dict) and any(_is_fc(v) for v in sec.values())
+
+
+def _cache_complete(method: str, cached: dict | None) -> bool:
+    if not cached:
+        return False
+    data = cached.get("data") or {}
+    if method == "territory_transformation":
+        return _section_ready(data.get("before")) and _section_ready(data.get("after"))
+    return True
+
+
 @router.get("/methods")
 async def get_methods():
     """router for getting method names available for tasks creation"""
@@ -63,13 +80,8 @@ async def create_task(
         task_id = f"{method}_{params_filled.scenario_id}_{phash}"
 
         cached = file_cache.load(method, params_filled.scenario_id, phash)
-        if cached:
-            data = cached.get("data") or {}
-            cache_complete = True
-            if method == "territory_transformation":
-                cache_complete = bool(data.get("after"))
-            if cache_complete:
-                return {"task_id": task_id, "status": "done"}
+        if _cache_complete(method, cached):
+            return {"task_id": task_id, "status": "done"}
 
         existing = _task_map.get(task_id)
         if existing and existing.status in {"queued", "running"}:
@@ -96,23 +108,22 @@ async def task_status(task_id: str):
     if method and scenario_id is not None and phash:
         try:
             cached = file_cache.load(method, scenario_id, phash)
-            if cached:
+            if _cache_complete(method, cached):
                 return {"task_id": task_id, "status": "done"}
+            if cached:
+                return {"task_id": task_id, "status": "running"}
         except Exception:
             pass
 
     task = _task_map.get(task_id)
     if task:
-        return {
+        payload = {
             "task_id": task_id,
             "status": getattr(task, "status", "unknown"),
-            **(
-                {"error": str(task.error)}
-                if getattr(task, "status", None) == "failed"
-                and getattr(task, "error", None)
-                else {}
-            ),
         }
+        if getattr(task, "status", None) == "failed" and getattr(task, "error", None):
+            payload["error"] = str(task.error)
+        return payload
 
     raise http_exception(404, "task not found", task_id)
 
