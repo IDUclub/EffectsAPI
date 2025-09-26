@@ -29,13 +29,14 @@ from iduedu import config
 from loguru import logger
 
 from app.effects_api.modules.scenario_service import ScenarioService
-from app.effects_api.modules.service_type_service import adapt_service_types
+from app.effects_api.modules.service_type_service import adapt_service_types, build_en_to_ru_map, \
+    remap_properties_keys_in_geojson
 
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, round_coords
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, round_coords, is_fc
 from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES, MAX_EVALS, MAX_RUNS
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -796,10 +797,7 @@ class EffectsService:
             )
         )
 
-        params_for_hash = params.model_dump() | {
-            "base_func_zone_source": base_src,
-            "base_func_zone_year": base_year,
-        }
+        params_for_hash = await self.build_hash_params(params, token)
         phash = self.cache.params_hash(params_for_hash)
 
         cached = self.cache.load(method_name, params.scenario_id, phash)
@@ -808,7 +806,7 @@ class EffectsService:
             and cached["meta"]["scenario_updated_at"] == updated_at
             and "before" in cached["data"]
         ):
-            return {n: fc_to_gdf(fc) for n, fc in cached["data"]["before"].items()}
+            return {n: fc_to_gdf(fc) for n, fc in cached["data"]["before"].items() if is_fc(fc)}
 
         logger.info("Cache stale or missing: recalculating BEFORE")
 
@@ -1049,28 +1047,22 @@ class EffectsService:
 
         prov_totals = await self.calculate_provision_totals(prov_gdfs_after)
 
-        from_cache = cached["data"] if cached else {}
-        from_cache["after"] = {
+        after_fc = {
             name: await gdf_to_ru_fc_rounded(gdf, ndigits=6)
             for name, gdf in prov_gdfs_after.items()
         }
-        from_cache["opt_context"] = {
-            "best_x": best_x,
-        }
-        from_cache["after"]["provision_total_after"] = prov_totals
+        after_fc["provision_total_after"] = prov_totals
 
-        payload = {
-            "after": prov_gdfs_after,
-            "opt_context": {"best_x": best_x},
-        }
-        payload["after"]["provision_total_after"] = prov_totals
+        from_cache = (cached.get("data", {}).copy() if cached else {})
+        from_cache["after"] = after_fc
+        from_cache["opt_context"] = {"best_x": best_x}
 
         if save_cache:
             self.cache.save(
                 "territory_transformation",
                 params.scenario_id,
                 params_for_hash,
-                payload,
+                from_cache,  # <-- сохраняем объединённые данные
                 scenario_updated_at=updated_at,
             )
 
@@ -1263,6 +1255,9 @@ class EffectsService:
         gdf_out = gdf_out.to_crs(crs="EPSG:4326")
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
         geojson = json.loads(gdf_out.to_json())
+        service_types = await self.urban_api_client.get_service_types()
+        en2ru = await build_en_to_ru_map(service_types)
+        geojson = await remap_properties_keys_in_geojson(geojson, en2ru)
 
         self.cache.save(
             "values_transformation",
