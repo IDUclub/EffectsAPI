@@ -310,6 +310,7 @@ class UrbanAPIClient:
         rows = [
             {
                 "service_type_id": it.get("service_type_id"),
+                "name": it.get("name"),
                 "infrastructure_type": it.get("infrastructure_type"),
                 "weight_value": it.get("properties", {}).get("weight_value"),
             }

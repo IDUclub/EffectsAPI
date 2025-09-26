@@ -32,6 +32,10 @@ def fc_to_gdf(fc: dict) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
 
 
+def is_fc(obj: dict) -> bool:
+    return isinstance(obj, dict) and obj.get("type") == "FeatureCollection" and "features" in obj
+
+
 def round_coords(
     geometry: gpd.GeoSeries | BaseGeometry, ndigits: int = 6
 ) -> gpd.GeoSeries | BaseGeometry:

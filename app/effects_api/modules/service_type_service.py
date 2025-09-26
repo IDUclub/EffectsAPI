@@ -106,3 +106,30 @@ async def get_services_with_ids_from_layer(
         return {"services": _map_services(prov_names)}
 
     return {"before": [], "after": []}
+
+async def build_en_to_ru_map(service_types_df: pd.DataFrame) -> dict[str, str]:
+    russian_names_dict = {}
+    for st_id, en_key in SERVICE_TYPES_MAPPING.items():
+        if not en_key:
+            continue
+        if st_id in service_types_df.index:
+            ru_name = service_types_df.loc[st_id, "name"]
+            if isinstance(ru_name, pd.Series):  # на всякий
+                ru_name = ru_name.iloc[0]
+            if isinstance(ru_name, str) and ru_name.strip():
+                russian_names_dict[en_key] = ru_name
+    return russian_names_dict
+
+async def remap_properties_keys_in_geojson(geojson: dict, en2ru: dict[str, str]) -> dict:
+    feats = geojson.get("features", [])
+    for f in feats:
+        props = f.get("properties", {})
+        to_rename = [(k, en2ru[k]) for k in props.keys() if k in en2ru]
+        for old_k, new_k in to_rename:
+            if new_k in props and isinstance(props[new_k], dict) and isinstance(props[old_k], dict):
+                merged = {**props[old_k], **props[new_k]}
+                props[new_k] = merged
+            else:
+                props[new_k] = props[old_k]
+            del props[old_k]
+    return geojson
