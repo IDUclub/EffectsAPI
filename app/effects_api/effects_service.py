@@ -2,6 +2,8 @@ import json
 from typing import Any, Dict, Optional
 
 import geopandas as gpd
+import iduedu
+import networkx as nx
 import numpy as np
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
@@ -25,14 +27,15 @@ from blocksnet.relations import (
     get_accessibility_context,
     get_accessibility_graph,
 )
+from iduedu.utils.utils import remove_weakly_connected_nodes
 from loguru import logger
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from app.effects_api.modules.scenario_service import ScenarioService
 from app.effects_api.modules.service_type_service import adapt_service_types
-from ..clients.graph_api_client import GraphAPIClient
 
+from ..clients.graph_api_client import GraphAPIClient
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
@@ -766,7 +769,10 @@ class EffectsService:
         return blocks[["geometry"]].join(prov_df, how="right")
 
     async def territory_transformation_scenario_before(
-        self, token: str, params: ContextDevelopmentDTO, context_blocks: pd.DataFrame | gpd.GeoDataFrame
+        self,
+        token: str,
+        params: ContextDevelopmentDTO,
+        context_blocks: pd.DataFrame | gpd.GeoDataFrame,
     ):
         method_name = "territory_transformation"
 
@@ -812,7 +818,6 @@ class EffectsService:
             )
         )
 
-
         base_scenario_blocks, base_scenario_buildings = (
             await self.aggregate_blocks_layer_scenario(
                 base_scenario_id, base_src, base_year, token
@@ -826,6 +831,8 @@ class EffectsService:
         merged = unary_union(before_blocks_area.geometry)
         graph = await self.graph_api_client.get_graph("intermodal", geometry=merged)
         # graph = get_accessibility_graph(before_blocks, "intermodal")
+        graph = remove_weakly_connected_nodes(graph)
+        graph = nx.convert_node_labels_to_integers(graph)
         acc_mx = calculate_accessibility_matrix(before_blocks, graph)
 
         prov_gdfs_before = {}
@@ -888,7 +895,10 @@ class EffectsService:
         return facade
 
     async def territory_transformation_scenario_after(
-        self, token, params: ContextDevelopmentDTO | DevelopmentDTO, context_blocks: pd.DataFrame | gpd.GeoDataFrame
+        self,
+        token,
+        params: ContextDevelopmentDTO | DevelopmentDTO,
+        context_blocks: pd.DataFrame | gpd.GeoDataFrame,
     ):
         # provision after
         method_name = "territory_transformation"
@@ -1038,7 +1048,9 @@ class EffectsService:
             params.context_func_source_year,
             token,
         )
-        prov_before = await self.territory_transformation_scenario_before(token, params, context_blocks)
+        prov_before = await self.territory_transformation_scenario_before(
+            token, params, context_blocks
+        )
         if is_based:
             return prov_before
 
@@ -1057,7 +1069,9 @@ class EffectsService:
             }
             return {"before": prov_before, "after": prov_after}
 
-        prov_after = await self.territory_transformation_scenario_after(token, params, context_blocks)
+        prov_after = await self.territory_transformation_scenario_after(
+            token, params, context_blocks
+        )
         return {"before": prov_before, "after": prov_after}
 
     async def values_transformation(
@@ -1090,7 +1104,9 @@ class EffectsService:
                 params.context_func_source_year,
                 token,
             )
-            await self.territory_transformation_scenario_after(token, params, context_blocks)
+            await self.territory_transformation_scenario_after(
+                token, params, context_blocks
+            )
             cached = self.cache.load(method_name, params.scenario_id, phash)
 
         best_x = cached["data"]["opt_context"]["best_x"]
@@ -1139,9 +1155,9 @@ class EffectsService:
         return float(np.mean(vals)) if vals else np.nan
 
     async def values_oriented_requirements(
-            self,
-            token: str,
-            params: TerritoryTransformationDTO,
+        self,
+        token: str,
+        params: TerritoryTransformationDTO,
     ):
         method_name = "values_oriented_requirements"
 
@@ -1181,7 +1197,9 @@ class EffectsService:
         scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
 
         cap_cols = [c for c in scenario_blocks.columns if c.startswith("capacity_")]
-        scenario_blocks.loc[scenario_blocks["is_project"], ["population"] + cap_cols] = 0
+        scenario_blocks.loc[
+            scenario_blocks["is_project"], ["population"] + cap_cols
+        ] = 0
         if "capacity" in scenario_blocks.columns:
             scenario_blocks = scenario_blocks.drop(columns="capacity")
 
@@ -1198,14 +1216,22 @@ class EffectsService:
         acc_mx = calculate_accessibility_matrix(blocks, graph)
 
         prov_gdfs: dict[str, gpd.GeoDataFrame] = {}
-        if cached and cached["meta"].get("scenario_updated_at") == updated_at and "provision" in cached["data"]:
+        if (
+            cached
+            and cached["meta"].get("scenario_updated_at") == updated_at
+            and "provision" in cached["data"]
+        ):
             for st_name, fc in cached["data"]["provision"].items():
-                prov_gdfs[st_name] = gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
+                prov_gdfs[st_name] = gpd.GeoDataFrame.from_features(
+                    fc["features"], crs="EPSG:4326"
+                )
         else:
             for st_id in service_types.index:
                 st_name = service_types.loc[st_id, "name"]
                 prov_gdf = await self._assess_provision(blocks, acc_mx, st_name)
-                prov_gdf = prov_gdf.to_crs(4326).drop(columns="provision_weak", errors="ignore")
+                prov_gdf = prov_gdf.to_crs(4326).drop(
+                    columns="provision_weak", errors="ignore"
+                )
                 num_cols = prov_gdf.select_dtypes(include="number").columns
                 prov_gdf[num_cols] = prov_gdf[num_cols].fillna(0)
                 prov_gdfs[st_name] = prov_gdf
@@ -1259,4 +1285,3 @@ class EffectsService:
         )
 
         return result_df
-
