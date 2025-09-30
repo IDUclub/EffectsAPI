@@ -206,3 +206,37 @@ async def get_layer(scenario_id: int, method_name: str):
 
     data: dict = cached["data"]
     return JSONResponse(content=data)
+
+@router.get("/get_provisions/{scenario_id}")
+async def get_total_provisions(scenario_id: int):
+    cached = file_cache.load_latest("territory_transformation", scenario_id)
+    if not cached:
+        raise http_exception(404, "no saved result for this scenario", scenario_id)
+
+    data: dict = cached["data"]
+
+    before_dict = data.get("before", {}) or {}
+    after_dict = data.get("after", {}) or {}
+
+    provision_before = before_dict.get("provision_total_before")
+    provision_after = after_dict.get("provision_total_after")
+
+    if provision_before and provision_after:
+        return JSONResponse(
+            content={
+                "provision_total_before": provision_before,
+                "provision_total_after": provision_after,
+            }
+        )
+
+    if provision_before and not provision_after:
+        return JSONResponse(
+            content={"provision_total_before": provision_before}
+        )
+
+    if provision_after and not provision_before:
+        return JSONResponse(
+            content={"provision_total_after": provision_after}
+        )
+
+    raise http_exception(404, f"Result for scenario ID{scenario_id} not found")
