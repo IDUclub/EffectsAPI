@@ -935,14 +935,14 @@ class EffectsService:
 
         cached = self.cache.load(method_name, params.scenario_id, phash)
         if (
-            cached
-            and cached["meta"]["scenario_updated_at"] == updated_at
-            and "after" in cached["data"]
+                cached
+                and cached["meta"]["scenario_updated_at"] == updated_at
+                and "after" in cached["data"]
         ):
-            return {
-                n: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
-                for n, fc in cached["data"]["after"].items()
-            }
+            gdfs_after = {n: fc_to_gdf(fc) for n, fc in cached["data"]["after"].items() if is_fc(fc)}
+            totals = cached["data"]["after"].get("provision_total_after")
+            opt_ctx = (cached.get("data", {}).get("opt_context") or {})
+            return {"prov_gdfs_after": gdfs_after, "prov_totals": totals, **opt_ctx}
 
         logger.info("AFTER: cache stale or missing; recalculating")
 
@@ -1104,8 +1104,9 @@ class EffectsService:
             and "after" in cached["data"]
         ):
             prov_after = {
-                name: gpd.GeoDataFrame.from_features(fc["features"], crs="EPSG:4326")
+                name: fc_to_gdf(fc)
                 for name, fc in cached["data"]["after"].items()
+                if is_fc(fc)
             }
             return {"before": prov_before, "after": prov_after}
 
