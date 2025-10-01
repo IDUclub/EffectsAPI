@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -600,7 +600,7 @@ class EffectsService:
         params = await self.get_optimal_func_zone_data(params, token)
 
         context_blocks, _ = await self.aggregate_blocks_layer_context(
-            sid, params.context_func_zone_source, params.proj_func_source_year, token
+            sid, params.context_func_zone_source, params.context_func_source_year, token
         )
 
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
@@ -1275,9 +1275,11 @@ class EffectsService:
         return float(np.mean(vals)) if vals else np.nan
 
     async def values_oriented_requirements(
-        self,
-        token: str,
-        params: TerritoryTransformationDTO,
+            self,
+            token: str,
+            params: TerritoryTransformationDTO | DevelopmentDTO,
+            # context_blocks: gpd.GeoDataFrame,
+            persist: Literal["full", "table_only"] = "full",
     ):
         method_name = "values_oriented_requirements"
 
@@ -1390,18 +1392,153 @@ class EffectsService:
             for sv_id, val in result_df["social_value_level"].to_dict().items()
         }
 
-        self.cache.save(
-            method_name,
-            params.scenario_id,
-            params_for_hash,
-            {
+        if persist == "full":
+            payload = {
                 "provision": {
                     name: await gdf_to_ru_fc_rounded(gdf, ndigits=6)
                     for name, gdf in prov_gdfs.items()
                 },
                 "result": values_table,
-            },
+            }
+        else:  # "table_only"
+            payload = {
+                "result": values_table,
+            }
+
+        self.cache.save(
+            method_name,
+            params.scenario_id,
+            params_for_hash,
+            payload,
             scenario_updated_at=updated_at,
         )
 
         return result_df
+
+    async def run_values_oriented_requirements(
+            self,
+            token: str,
+            params: TerritoryTransformationDTO,
+    ):
+        """
+        Находит базовый сценарий, считает текущий (full) и базовый (table_only),
+        читает обе таблицы из кэша и дописывает их в кэш текущего сценария.
+        """
+        method_name = "values_oriented_requirements"
+
+        # ВАЖНО: тут у вас была опечатка: использовался proj_func_source_year для контекста.
+        # context_blocks, _ = await self.aggregate_blocks_layer_context(
+        #     params.scenario_id,
+        #     params.context_func_zone_source,
+        #     params.context_func_source_year,  # ← исправлено
+        #     token,
+        # )
+
+        df_current = await self.values_oriented_requirements(token, params, persist="full")
+
+        params_for_hash_curr = await self.build_hash_params(params, token)
+        phash_curr = self.cache.params_hash(params_for_hash_curr)
+        info_curr = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+        updated_at_curr = info_curr["updated_at"]
+
+        cached_curr = self.cache.load(method_name, params.scenario_id, phash_curr)
+        if not (cached_curr and cached_curr["meta"].get("scenario_updated_at") == updated_at_curr):
+            raise RuntimeError("Не удалось найти кэш текущего сценария после расчёта.")
+
+        def _extract_values_table(payload, soc_values_map):
+            import pandas as pd
+            if isinstance(payload, dict) and "data" not in payload:
+                return payload
+            df = pd.DataFrame(data=payload["data"], index=payload["index"], columns=payload["columns"])
+            df.index.name = payload.get("index_name", None)
+            col = df.columns[0]
+            return {
+                int(sv_id): {"name": soc_values_map.get(sv_id, str(sv_id)),
+                             "value": round(float(val), 2) if val else 0.0}
+                for sv_id, val in df[col].to_dict().items()
+            }
+
+        soc_values_map = await self.urban_api_client.get_social_values_info()
+        table_current = _extract_values_table(cached_curr["data"]["result"], soc_values_map)
+
+        project_id = (info_curr.get("project") or {}).get("project_id")
+        regional_id = (info_curr.get("parent_scenario") or {}).get("id")
+        base_id, base_updated_at = None, None
+
+        if project_id and regional_id:
+            proj_scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
+
+            def _truthy_is_based(x):
+                v = x.get("is_based")
+                return v is True or v == 1 or (isinstance(v, str) and v.lower() == "true")
+
+            def _parent_id(x):
+                p = x.get("parent_scenario")
+                return p.get("id") if isinstance(p, dict) else p
+
+            def _sid(x):
+                try:
+                    return int(x.get("scenario_id"))
+                except Exception:
+                    return None
+
+            matches = [
+                s for s in proj_scenarios
+                if _truthy_is_based(s) and _parent_id(s) == regional_id and _sid(s) is not None
+            ]
+            if not matches:
+                only_based = [s for s in proj_scenarios if _truthy_is_based(s) and _sid(s) is not None]
+                if only_based:
+                    only_based.sort(key=lambda x: (x.get("updated_at") is not None, x.get("updated_at")), reverse=True)
+                    matches = [only_based[0]]
+            if matches:
+                matches.sort(key=lambda x: (x.get("updated_at") is not None, x.get("updated_at")), reverse=True)
+                base_id = _sid(matches[0])
+                base_updated_at = matches[0].get("updated_at")
+
+        table_base = {}
+
+        if base_id:
+            params_base = params.model_copy(update={
+                "scenario_id": base_id,
+                "proj_func_zone_source": None,
+                "proj_func_source_year": None,
+                "context_func_zone_source": None,
+                "context_func_source_year": None,
+            })
+            params_base = await self.get_optimal_func_zone_data(params_base, token)
+
+            params_for_hash_base = await self.build_hash_params(params_base, token)
+            phash_base = self.cache.params_hash(params_for_hash_base)
+
+            if not base_updated_at:
+                info_base = await self.urban_api_client.get_scenario_info(base_id, token)
+                base_updated_at = info_base.get("updated_at")
+
+            cached_base = self.cache.load(method_name, base_id, phash_base)
+
+            if cached_base and cached_base["meta"].get("scenario_updated_at") == base_updated_at and "result" in \
+                    cached_base["data"]:
+                table_base = _extract_values_table(cached_base["data"]["result"], soc_values_map)
+            else:
+                _ = await self.values_oriented_requirements(
+                    token, params_base, persist="table_only"
+                )
+                cached_base = self.cache.load(method_name, base_id, phash_base)
+                if cached_base and cached_base["meta"].get("scenario_updated_at") == base_updated_at and "result" in \
+                        cached_base["data"]:
+                    table_base = _extract_values_table(cached_base["data"]["result"], soc_values_map)
+
+            self.cache.save(
+                method_name,
+                params.scenario_id,
+                params_for_hash_curr,
+                {
+                    **cached_curr["data"],
+                    "values_table_current": table_current,
+                    "values_table_base": table_base,
+                },
+                scenario_updated_at=updated_at_curr,
+            )
+
+        return df_current, table_current, table_base
