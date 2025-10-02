@@ -25,19 +25,26 @@ from blocksnet.relations import (
     get_accessibility_context,
     get_accessibility_graph,
 )
-from iduedu import config
 from loguru import logger
 
 from app.effects_api.modules.scenario_service import ScenarioService
-from app.effects_api.modules.service_type_service import adapt_service_types, build_en_to_ru_map, \
-    remap_properties_keys_in_geojson
+from app.effects_api.modules.service_type_service import (
+    adapt_service_types,
+    build_en_to_ru_map,
+    remap_properties_keys_in_geojson,
+)
 
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, round_coords, is_fc
-from .constants.const import INFRASTRUCTURES_WEIGHTS, LAND_USE_RULES, MAX_EVALS, MAX_RUNS
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords
+from .constants.const import (
+    INFRASTRUCTURES_WEIGHTS,
+    LAND_USE_RULES,
+    MAX_EVALS,
+    MAX_RUNS,
+)
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
@@ -88,7 +95,9 @@ class EffectsService:
                 token, base_scenario_id, None, None
             )
         )
-        return params.model_dump() | {
+        p = params.model_dump()
+        p.pop("force", None)
+        return p | {
             "base_func_zone_source": base_src,
             "base_func_zone_year": base_year,
         }
@@ -791,22 +800,23 @@ class EffectsService:
 
         params = await self.get_optimal_func_zone_data(params, token)
 
-        base_src, base_year = (
-            await self.urban_api_client.get_optimal_func_zone_request_data(
-                token, base_scenario_id, None, None
-            )
-        )
-
         params_for_hash = await self.build_hash_params(params, token)
         phash = self.cache.params_hash(params_for_hash)
 
-        cached = self.cache.load(method_name, params.scenario_id, phash)
+        force = getattr(params, "force", False)
+        cached = (
+            None if force else self.cache.load(method_name, params.scenario_id, phash)
+        )
         if (
             cached
             and cached["meta"]["scenario_updated_at"] == updated_at
             and "before" in cached["data"]
         ):
-            return {n: fc_to_gdf(fc) for n, fc in cached["data"]["before"].items() if is_fc(fc)}
+            return {
+                n: fc_to_gdf(fc)
+                for n, fc in cached["data"]["before"].items()
+                if is_fc(fc)
+            }
 
         logger.info("Cache stale or missing: recalculating BEFORE")
 
@@ -969,7 +979,9 @@ class EffectsService:
         try:
             graph = get_accessibility_graph(after_blocks, "intermodal")
         except Exception as e:
-            raise http_exception(500, "Error generating territory graph", _detail=str(e))
+            raise http_exception(
+                500, "Error generating territory graph", _detail=str(e)
+            )
 
         acc_mx = calculate_accessibility_matrix(after_blocks, graph)
 
@@ -1053,7 +1065,7 @@ class EffectsService:
         }
         after_fc["provision_total_after"] = prov_totals
 
-        from_cache = (cached.get("data", {}).copy() if cached else {})
+        from_cache = cached.get("data", {}).copy() if cached else {}
         from_cache["after"] = after_fc
         from_cache["opt_context"] = {"best_x": best_x}
 
@@ -1115,9 +1127,9 @@ class EffectsService:
         return {"before": prov_before, "after": prov_after}
 
     async def values_transformation(
-            self,
-            token: str,
-            params: TerritoryTransformationDTO,
+        self,
+        token: str,
+        params: TerritoryTransformationDTO,
     ) -> dict:
         opt_method = "territory_transformation_opt"
 
@@ -1125,6 +1137,7 @@ class EffectsService:
 
         params_for_hash = await self.build_hash_params(params, token)
         phash = self.cache.params_hash(params_for_hash)
+        force = getattr(params, "force", False)
 
         info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
         updated_at = info["updated_at"]
@@ -1136,11 +1149,14 @@ class EffectsService:
             token,
         )
 
-        opt_cached = self.cache.load(opt_method, params.scenario_id, phash)
+        opt_cached = (
+            None if force else self.cache.load(opt_method, params.scenario_id, phash)
+        )
         need_refresh = (
-                not opt_cached
-                or opt_cached["meta"]["scenario_updated_at"] != updated_at
-                or "best_x" not in opt_cached["data"]
+            force
+            or not opt_cached
+            or opt_cached["meta"]["scenario_updated_at"] != updated_at
+            or "best_x" not in opt_cached["data"]
         )
         if need_refresh:
             res = await self.territory_transformation_scenario_after(
@@ -1178,40 +1194,58 @@ class EffectsService:
             )
         else:
             after_blocks.index = after_blocks.index.astype(int)
-            after_blocks = after_blocks[~after_blocks.index.duplicated(keep="last")].sort_index()
+            after_blocks = after_blocks[
+                ~after_blocks.index.duplicated(keep="last")
+            ].sort_index()
         after_blocks.index.name = "block_id"
 
         if "is_project" in after_blocks.columns:
-            after_blocks["is_project"] = after_blocks["is_project"].fillna(False).astype(bool)
+            after_blocks["is_project"] = (
+                after_blocks["is_project"].fillna(False).astype(bool)
+            )
         else:
             after_blocks["is_project"] = False
 
         try:
             graph = get_accessibility_graph(after_blocks, "intermodal")
         except Exception as e:
-            raise http_exception(500, "Error generating territory graph", _detail=str(e))
+            raise http_exception(
+                500, "Error generating territory graph", _detail=str(e)
+            )
 
         acc_mx = calculate_accessibility_matrix(after_blocks, graph)
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
-        service_types = service_types[~service_types["infrastructure_type"].isna()].copy()
+        service_types = service_types[
+            ~service_types["infrastructure_type"].isna()
+        ].copy()
         service_types["infrastructure_weight"] = (
-                service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
-                * service_types["infrastructure_weight"]
+            service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
+            * service_types["infrastructure_weight"]
         )
 
         facade = self._build_facade(after_blocks, acc_mx, service_types)
-        test_blocks: gpd.GeoDataFrame = after_blocks.loc[list(facade._blocks_lu.keys())].copy()
+        test_blocks: gpd.GeoDataFrame = after_blocks.loc[
+            list(facade._blocks_lu.keys())
+        ].copy()
         test_blocks.index = test_blocks.index.astype(int)
 
         solution_df = facade.solution_to_services_df(best_x).copy()
         solution_df["block_id"] = solution_df["block_id"].astype(int)
-        metrics = [c for c in ["site_area", "build_floor_area", "capacity", "count"] if c in solution_df.columns]
+        metrics = [
+            c
+            for c in ["site_area", "build_floor_area", "capacity", "count"]
+            if c in solution_df.columns
+        ]
         zero_dict = {m: 0 for m in metrics}
 
         if len(metrics):
-            agg = solution_df.groupby(["block_id", "service_type"])[metrics].sum().sort_index()
+            agg = (
+                solution_df.groupby(["block_id", "service_type"])[metrics]
+                .sum()
+                .sort_index()
+            )
         else:
             agg = (
                 solution_df.groupby(["block_id", "service_type"])
@@ -1230,7 +1264,11 @@ class EffectsService:
                     pass
             return d
 
-        cells = agg.apply(_row_to_dict, axis=1) if len(metrics) else agg.apply(lambda _: {}, axis=1)
+        cells = (
+            agg.apply(_row_to_dict, axis=1)
+            if len(metrics)
+            else agg.apply(lambda _: {}, axis=1)
+        )
         wide = cells.unstack("service_type").reindex(index=test_blocks.index)
 
         all_services = sorted(solution_df["service_type"].dropna().unique().tolist())
@@ -1249,7 +1287,9 @@ class EffectsService:
 
         geom_col = test_blocks_with_services.geometry.name
         service_cols = all_services
-        base_cols = [c for c in ["is_project"] if c in test_blocks_with_services.columns]
+        base_cols = [
+            c for c in ["is_project"] if c in test_blocks_with_services.columns
+        ]
 
         gdf_out = test_blocks_with_services[base_cols + service_cols + [geom_col]]
         gdf_out = gdf_out.to_crs(crs="EPSG:4326")
@@ -1283,11 +1323,14 @@ class EffectsService:
         params = await self.get_optimal_func_zone_data(params, token)
         params_for_hash = await self.build_hash_params(params, token)
         phash = self.cache.params_hash(params_for_hash)
+        force = getattr(params, "force", False)
 
         info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
         updated_at = info["updated_at"]
 
-        cached = self.cache.load(method_name, params.scenario_id, phash)
+        cached = (
+            None if force else self.cache.load(method_name, params.scenario_id, phash)
+        )
         if cached and cached["meta"].get("scenario_updated_at") == updated_at:
             if "result" in cached["data"]:
                 payload = cached["data"]["result"]
