@@ -818,7 +818,7 @@ class EffectsService:
                 if is_fc(fc)
             }
 
-        logger.info("Cache stale or missing: recalculating BEFORE")
+        logger.info("Cache stale, missing or forced: calculating BEFORE")
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
@@ -943,7 +943,10 @@ class EffectsService:
         params_for_hash = await self.build_hash_params(params, token)
         phash = self.cache.params_hash(params_for_hash)
 
-        cached = self.cache.load(method_name, params.scenario_id, phash)
+        force = getattr(params, "force", False)
+        cached = (
+            None if force else self.cache.load(method_name, params.scenario_id, phash)
+        )
         if (
             cached
             and cached["meta"]["scenario_updated_at"] == updated_at
@@ -954,7 +957,7 @@ class EffectsService:
                 for n, fc in cached["data"]["after"].items()
             }
 
-        logger.info("AFTER: cache stale or missing; recalculating")
+        logger.info("Cache stale, missing or forced: calculating AFTER")
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
