@@ -121,7 +121,7 @@ class ScenarioService:
         crs = project_boundaries.estimate_utm_crs()
         project_boundaries = project_boundaries.to_crs(crs)
         return await self._get_scenario_blocks(
-            user_scenario_id, base_scenario_id, project_boundaries, token
+            user_scenario_id, project_boundaries, token
         )
 
     async def get_scenario_functional_zones(

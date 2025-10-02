@@ -1077,7 +1077,7 @@ class EffectsService:
                 "territory_transformation",
                 params.scenario_id,
                 params_for_hash,
-                from_cache,  # <-- сохраняем объединённые данные
+                from_cache,
                 scenario_updated_at=updated_at,
             )
 
