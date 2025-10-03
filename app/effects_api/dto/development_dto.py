@@ -4,6 +4,10 @@ from pydantic import BaseModel, Field
 
 
 class DevelopmentDTO(BaseModel):
+    force: bool = Field(
+        default=False, description="flag for recalculating the scenario"
+    )
+
     scenario_id: int = Field(
         ...,
         examples=[822],

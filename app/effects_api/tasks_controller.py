@@ -80,12 +80,14 @@ async def create_task(
 
         task_id = f"{method}_{params_filled.scenario_id}_{phash}"
 
-        cached = file_cache.load(method, params_filled.scenario_id, phash)
-        if _cache_complete(method, cached):
+        force = getattr(params, "force", False)
+
+        cached = None if force else file_cache.load(method, params_filled.scenario_id, phash)
+        if not force and _cache_complete(method, cached):
             return {"task_id": task_id, "status": "done"}
 
-        existing = _task_map.get(task_id)
-        if existing and existing.status in {"queued", "running"}:
+        existing = None if force else _task_map.get(task_id)
+        if not force and existing and existing.status in {"queued", "running"}:
             return {"task_id": task_id, "status": existing.status}
 
         task = AnyTask(
