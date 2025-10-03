@@ -33,13 +33,17 @@ def _get_lock(key: str) -> asyncio.Lock:
 
 
 async def _with_defaults(
-        dto: ContextDevelopmentDTO, token: str
+    dto: ContextDevelopmentDTO, token: str
 ) -> ContextDevelopmentDTO:
     return await effects_service.get_optimal_func_zone_data(dto, token)
 
 
 def _is_fc(x: dict) -> bool:
-    return isinstance(x, dict) and x.get("type") == "FeatureCollection" and isinstance(x.get("features"), list)
+    return (
+        isinstance(x, dict)
+        and x.get("type") == "FeatureCollection"
+        and isinstance(x.get("features"), list)
+    )
 
 
 def _section_ready(sec: dict | None) -> bool:
@@ -63,9 +67,9 @@ async def get_methods():
 
 @router.post("/{method}", status_code=202)
 async def create_task(
-        method: str,
-        params: Annotated[ContextDevelopmentDTO, Depends()],
-        token: str = Depends(verify_token),
+    method: str,
+    params: Annotated[ContextDevelopmentDTO, Depends()],
+    token: str = Depends(verify_token),
 ):
     if method not in TASK_METHODS:
         raise http_exception(404, f"method '{method}' is not registered", method)
@@ -82,7 +86,9 @@ async def create_task(
 
         force = getattr(params, "force", False)
 
-        cached = None if force else file_cache.load(method, params_filled.scenario_id, phash)
+        cached = (
+            None if force else file_cache.load(method, params_filled.scenario_id, phash)
+        )
         if not force and _cache_complete(method, cached):
             return {"task_id": task_id, "status": "done"}
 
@@ -133,8 +139,8 @@ async def task_status(task_id: str):
 
 @router.get("/get_service_types")
 async def get_service_types(
-        scenario_id: int,
-        method: str = "territory_transformation",
+    scenario_id: int,
+    method: str = "territory_transformation",
 ):
     return await get_services_with_ids_from_layer(scenario_id, method, file_cache)
 
@@ -187,26 +193,32 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
 
 @router.get("/values_oriented_requirements/{scenario_id}/{service_name}")
 async def get_values_oriented_requirements_layer(
-        scenario_id: int,
-        service_name: str,
-        token: str = Depends(verify_token),
+    scenario_id: int,
+    service_name: str,
+    token: str = Depends(verify_token),
 ):
     base_id = await _resolve_base_id(urban_api_client, token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
-        raise http_exception(404, f"no saved result for base scenario {base_id}", base_id)
+        raise http_exception(
+            404, f"no saved result for base scenario {base_id}", base_id
+        )
 
     info_base = await urban_api_client.get_scenario_info(base_id, token)
     if cached.get("meta", {}).get("scenario_updated_at") != info_base.get("updated_at"):
-        raise http_exception(404, f"stale cache for base scenario {base_id}, recompute required", base_id)
+        raise http_exception(
+            404, f"stale cache for base scenario {base_id}, recompute required", base_id
+        )
 
     data: dict = cached.get("data", {})
     prov = (data.get("provision") or {}).get(service_name)
     values_dict = data.get("result")
 
     if not prov:
-        raise http_exception(404, f"service '{service_name}' not found in base scenario {base_id}")
+        raise http_exception(
+            404, f"service '{service_name}' not found in base scenario {base_id}"
+        )
 
     return JSONResponse(
         content={
@@ -217,20 +229,24 @@ async def get_values_oriented_requirements_layer(
     )
 
 
-@router.get("/values_oriented_requirements_table/{scenario_id}/{service_name}")
+@router.get("/values_oriented_requirements_table/{scenario_id}")
 async def get_values_oriented_requirements_table(
-        scenario_id: int,
-        token: str = Depends(verify_token),
+    scenario_id: int,
+    token: str = Depends(verify_token),
 ):
     base_id = await _resolve_base_id(urban_api_client, token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
-        raise http_exception(404, f"no saved result for base scenario {base_id}", base_id)
+        raise http_exception(
+            404, f"no saved result for base scenario {base_id}", base_id
+        )
 
     info_base = await urban_api_client.get_scenario_info(base_id, token)
     if cached.get("meta", {}).get("scenario_updated_at") != info_base.get("updated_at"):
-        raise http_exception(404, f"stale cache for base scenario {base_id}, recompute required", base_id)
+        raise http_exception(
+            404, f"stale cache for base scenario {base_id}, recompute required", base_id
+        )
 
     data: dict = cached.get("data", {})
     values_dict = data.get("result")
@@ -276,13 +292,9 @@ async def get_total_provisions(scenario_id: int):
         )
 
     if provision_before and not provision_after:
-        return JSONResponse(
-            content={"provision_total_before": provision_before}
-        )
+        return JSONResponse(content={"provision_total_before": provision_before})
 
     if provision_after and not provision_before:
-        return JSONResponse(
-            content={"provision_total_after": provision_after}
-        )
+        return JSONResponse(content={"provision_total_after": provision_after})
 
     raise http_exception(404, f"Result for scenario ID{scenario_id} not found")
