@@ -7,6 +7,7 @@ from loguru import logger
 from app.clients.urban_api_client import UrbanAPIClient
 from app.common.api_handlers.json_api_handler import JSONAPIHandler
 from app.common.caching.caching_service import FileCache
+from app.common.utils.ids_convertation import EffectsUtils
 from app.effects_api.effects_service import EffectsService
 from app.effects_api.modules.scenario_service import ScenarioService
 
@@ -28,3 +29,4 @@ urban_api_client = UrbanAPIClient(json_api_handler)
 file_cache = FileCache()
 scenario_service = ScenarioService(urban_api_client)
 effects_service = EffectsService(urban_api_client, file_cache, scenario_service)
+effects_utils = EffectsUtils(urban_api_client)

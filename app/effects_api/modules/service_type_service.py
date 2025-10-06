@@ -6,6 +6,7 @@ from blocksnet.config import service_types_config
 
 from app.clients.urban_api_client import UrbanAPIClient
 from app.common.caching.caching_service import FileCache
+from app.common.utils.ids_convertation import EffectsUtils
 from app.effects_api.constants.const import SERVICE_TYPES_MAPPING
 
 _SOCIAL_VALUES_BY_ST: Dict[int, Optional[List[int]]] = {}
@@ -86,7 +87,12 @@ async def get_services_with_ids_from_layer(
     scenario_id: int,
     method: str,
     cache: FileCache,
+    utils: EffectsUtils,
+    token: str | None = None,
 ) -> dict:
+    if method == "values_oriented_requirements":
+        scenario_id = await utils.resolve_base_id(token, scenario_id)
+
     cached: dict | None = cache.load_latest(method, scenario_id)
     if not cached or "data" not in cached:
         return {"before": [], "after": []}
@@ -107,6 +113,7 @@ async def get_services_with_ids_from_layer(
 
     return {"before": [], "after": []}
 
+
 async def build_en_to_ru_map(service_types_df: pd.DataFrame) -> dict[str, str]:
     russian_names_dict = {}
     for st_id, en_key in SERVICE_TYPES_MAPPING.items():
@@ -120,13 +127,20 @@ async def build_en_to_ru_map(service_types_df: pd.DataFrame) -> dict[str, str]:
                 russian_names_dict[en_key] = ru_name
     return russian_names_dict
 
-async def remap_properties_keys_in_geojson(geojson: dict, en2ru: dict[str, str]) -> dict:
+
+async def remap_properties_keys_in_geojson(
+    geojson: dict, en2ru: dict[str, str]
+) -> dict:
     feats = geojson.get("features", [])
     for f in feats:
         props = f.get("properties", {})
         to_rename = [(k, en2ru[k]) for k in props.keys() if k in en2ru]
         for old_k, new_k in to_rename:
-            if new_k in props and isinstance(props[new_k], dict) and isinstance(props[old_k], dict):
+            if (
+                new_k in props
+                and isinstance(props[new_k], dict)
+                and isinstance(props[old_k], dict)
+            ):
                 merged = {**props[old_k], **props[new_k]}
                 props[new_k] = merged
             else:

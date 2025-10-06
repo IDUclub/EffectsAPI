@@ -14,8 +14,8 @@ from app.effects_api.modules.task_service import (
 )
 
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.ids_convertation import _resolve_base_id
-from ..dependencies import effects_service, file_cache, urban_api_client
+from ..common.utils.ids_convertation import EffectsUtils
+from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
 from .dto.development_dto import ContextDevelopmentDTO
 from .modules.service_type_service import get_services_with_ids_from_layer
 
@@ -141,8 +141,11 @@ async def task_status(task_id: str):
 async def get_service_types(
     scenario_id: int,
     method: str = "territory_transformation",
+    token: str = Depends(verify_token),
 ):
-    return await get_services_with_ids_from_layer(scenario_id, method, file_cache)
+    return await get_services_with_ids_from_layer(
+        scenario_id, method, file_cache, effects_utils, token=token
+    )
 
 
 @router.get("/territory_transformation/{scenario_id}/{service_name}")
@@ -197,7 +200,7 @@ async def get_values_oriented_requirements_layer(
     service_name: str,
     token: str = Depends(verify_token),
 ):
-    base_id = await _resolve_base_id(urban_api_client, token, scenario_id)
+    base_id = await EffectsUtils.resolve_base_id(token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
@@ -234,7 +237,7 @@ async def get_values_oriented_requirements_table(
     scenario_id: int,
     token: str = Depends(verify_token),
 ):
-    base_id = await _resolve_base_id(urban_api_client, token, scenario_id)
+    base_id = await EffectsUtils.resolve_base_id(token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
