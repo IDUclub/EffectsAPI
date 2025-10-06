@@ -217,6 +217,7 @@ async def get_values_oriented_requirements_layer(
     data: dict = cached.get("data", {})
     prov = (data.get("provision") or {}).get(service_name)
     values_dict = data.get("result")
+    values_table = data.get("social_values_table")
 
     if not prov:
         raise http_exception(
@@ -228,6 +229,7 @@ async def get_values_oriented_requirements_layer(
             "base_scenario_id": base_id,
             "geojson": prov,
             "values_table": values_dict,
+            "services_type_deficit": values_table,
         }
     )
 
@@ -253,11 +255,13 @@ async def get_values_oriented_requirements_table(
 
     data: dict = cached.get("data", {})
     values_dict = data.get("result")
+    values_table = data.get("social_values_table")
 
     return JSONResponse(
         content={
             "base_scenario_id": base_id,
             "values_table": values_dict,
+            "services_type_deficit": values_table,
         }
     )
 
