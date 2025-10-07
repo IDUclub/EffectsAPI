@@ -89,7 +89,7 @@ class ScenarioService:
         )
 
         if water is not None and not water.empty:
-            water = water.to_crs(crs).explode()
+            water = water.to_crs(crs).explode().reset_index(drop=True)
 
         if user_roads is not None and not user_roads.empty:
             user_roads = user_roads.to_crs(crs).explode().reset_index(drop=True)

@@ -14,10 +14,9 @@ from blocksnet.machine_learning.regression import DensityRegressor, SocialRegres
 from blocksnet.optimization.services import (
     AreaSolution,
     Facade,
-    SimpleChooser,
     TPEOptimizer,
     WeightedConstraints,
-    WeightedObjective,
+    WeightedObjective, GradientChooser,
 )
 from blocksnet.relations import (
     calculate_accessibility_matrix,
@@ -376,14 +375,14 @@ class EffectsService:
             blocks_services["capacity"] = (
                 blocks_services["capacity"].fillna(0).astype(int)
             )
-            blocks_services["objects_count"] = (
-                blocks_services["objects_count"].fillna(0).astype(int)
+            blocks_services["count"] = (
+                blocks_services["count"].fillna(0).astype(int)
             )
             blocks = blocks.join(
                 blocks_services.drop(columns=["geometry"]).rename(
                     columns={
                         "capacity": f"capacity_{service_type}",
-                        "objects_count": f"count_{service_type}",
+                        "count": f"count_{service_type}",
                     }
                 )
             )
@@ -1023,17 +1022,17 @@ class EffectsService:
             num_params=facade.num_params,
             facade=facade,
             weights=services_weights,
-            max_evals=MAX_EVALS,
+            max_evals=1000,
         )
         constraints = WeightedConstraints(num_params=facade.num_params, facade=facade)
         tpe_optimizer = TPEOptimizer(
             objective=objective,
             constraints=constraints,
-            vars_chooser=SimpleChooser(facade),
+            vars_chooser=GradientChooser(facade, facade.num_params, num_top=5),
         )
 
         best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=MAX_RUNS, timeout=60000, initial_runs_num=1
+            max_runs=1000, timeout=4*60, initial_runs_num=1
         )
 
         prov_gdfs_after = {}
@@ -1195,6 +1194,7 @@ class EffectsService:
         )
 
         after_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=False)
+        after_blocks.to_pickle("blocks_for_prediction.pkl")
         if "block_id" in after_blocks.columns:
             after_blocks["block_id"] = after_blocks["block_id"].astype(int)
             if after_blocks.index.name == "block_id":
