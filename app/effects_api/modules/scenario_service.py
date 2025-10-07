@@ -74,37 +74,29 @@ class ScenarioService:
     async def _get_scenario_blocks(
         self,
         user_scenario_id: int,
-        base_scenario_id: int,
         boundaries: gpd.GeoDataFrame,
         token: str,
     ) -> gpd.GeoDataFrame:
         crs = boundaries.crs
         boundaries.geometry = boundaries.buffer(-1)
 
-        water, user_roads, base_roads = await asyncio.gather(
+        (
+            water,
+            user_roads,
+        ) = await asyncio.gather(
             self._get_scenario_water(user_scenario_id, token),
             self._get_scenario_roads(user_scenario_id, token),
-            self._get_scenario_roads(base_scenario_id, token),
         )
 
         if water is not None and not water.empty:
             water = water.to_crs(crs).explode()
 
         if user_roads is not None and not user_roads.empty:
-            user_roads = user_roads.to_crs(crs).explode()
+            user_roads = user_roads.to_crs(crs).explode().reset_index(drop=True)
 
-        if base_roads is not None and not base_roads.empty:
-            base_roads = base_roads.to_crs(crs).explode()
-
-        if (
-            base_roads is not None
-            and not base_roads.empty
-            and user_roads is not None
-            and not user_roads.empty
-        ):
-            roads = pd.concat([user_roads, base_roads]).reset_index(drop=True)
-            roads.geometry = close_gaps(roads, 1)
-            roads = roads.explode(column="geometry")
+        if user_roads is not None and not user_roads.empty:
+            user_roads.geometry = close_gaps(user_roads, 1)
+            roads = user_roads.explode(column="geometry")
         else:
             raise http_exception(404, "No objects found for polygons cutting")
 
@@ -129,7 +121,7 @@ class ScenarioService:
         crs = project_boundaries.estimate_utm_crs()
         project_boundaries = project_boundaries.to_crs(crs)
         return await self._get_scenario_blocks(
-            user_scenario_id, base_scenario_id, project_boundaries, token
+            user_scenario_id, project_boundaries, token
         )
 
     async def get_scenario_functional_zones(

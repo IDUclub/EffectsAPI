@@ -57,7 +57,9 @@ class AnyTask:
             logger.info(f"[{self.task_id}] started")
             self.status = "running"
 
-            cached = self.cache.load(self.method, self.scenario_id, self.param_hash)
+            force = getattr(self.params, "force", False)
+
+            cached = None if force else self.cache.load(self.method, self.scenario_id, self.param_hash)
 
             def cache_complete(method: str, cached_obj: dict | None) -> bool:
                 if not cached_obj:
@@ -67,7 +69,7 @@ class AnyTask:
                     return bool(data.get("after"))
                 return True
 
-            if cache_complete(self.method, cached):
+            if not force and cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
                 self.result = cached["data"]
                 self.status = "done"

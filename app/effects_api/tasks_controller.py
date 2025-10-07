@@ -14,7 +14,8 @@ from app.effects_api.modules.task_service import (
 )
 
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..dependencies import effects_service, file_cache
+from ..common.utils.ids_convertation import EffectsUtils
+from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
 from .dto.development_dto import ContextDevelopmentDTO
 from .modules.service_type_service import get_services_with_ids_from_layer
 
@@ -38,7 +39,11 @@ async def _with_defaults(
 
 
 def _is_fc(x: dict) -> bool:
-    return isinstance(x, dict) and x.get("type") == "FeatureCollection" and isinstance(x.get("features"), list)
+    return (
+        isinstance(x, dict)
+        and x.get("type") == "FeatureCollection"
+        and isinstance(x.get("features"), list)
+    )
 
 
 def _section_ready(sec: dict | None) -> bool:
@@ -79,12 +84,16 @@ async def create_task(
 
         task_id = f"{method}_{params_filled.scenario_id}_{phash}"
 
-        cached = file_cache.load(method, params_filled.scenario_id, phash)
-        if _cache_complete(method, cached):
+        force = getattr(params, "force", False)
+
+        cached = (
+            None if force else file_cache.load(method, params_filled.scenario_id, phash)
+        )
+        if not force and _cache_complete(method, cached):
             return {"task_id": task_id, "status": "done"}
 
-        existing = _task_map.get(task_id)
-        if existing and existing.status in {"queued", "running"}:
+        existing = None if force else _task_map.get(task_id)
+        if not force and existing and existing.status in {"queued", "running"}:
             return {"task_id": task_id, "status": existing.status}
 
         task = AnyTask(
@@ -132,8 +141,11 @@ async def task_status(task_id: str):
 async def get_service_types(
     scenario_id: int,
     method: str = "territory_transformation",
+    token: str = Depends(verify_token),
 ):
-    return await get_services_with_ids_from_layer(scenario_id, method, file_cache)
+    return await get_services_with_ids_from_layer(
+        scenario_id, method, file_cache, effects_utils, token=token
+    )
 
 
 @router.get("/territory_transformation/{scenario_id}/{service_name}")
@@ -183,19 +195,75 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
 
 
 @router.get("/values_oriented_requirements/{scenario_id}/{service_name}")
-async def get_values_oriented_requirements_layer(scenario_id: int, service_name: str):
-    cached = file_cache.load_latest("values_oriented_requirements", scenario_id)
+async def get_values_oriented_requirements_layer(
+    scenario_id: int,
+    service_name: str,
+    token: str = Depends(verify_token),
+):
+    base_id = await effects_utils.resolve_base_id(token, scenario_id)
+
+    cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
-        raise http_exception(404, "no saved result for this scenario", scenario_id)
+        raise http_exception(
+            404, f"no saved result for base scenario {base_id}", base_id
+        )
 
-    data: dict = cached["data"]
+    info_base = await urban_api_client.get_scenario_info(base_id, token)
+    if cached.get("meta", {}).get("scenario_updated_at") != info_base.get("updated_at"):
+        raise http_exception(
+            404, f"stale cache for base scenario {base_id}, recompute required", base_id
+        )
 
-    fc_provision = data["provision"].get(service_name)
-    values_dict = data["result"]
-    if not (fc_provision and values_dict):
-        raise http_exception(404, f"service '{service_name}' not found")
+    data: dict = cached.get("data", {})
+    prov = (data.get("provision") or {}).get(service_name)
+    values_dict = data.get("result")
+    values_table = data.get("social_values_table")
 
-    return JSONResponse(content={"geojson": fc_provision, "values_table": values_dict})
+    if not prov:
+        raise http_exception(
+            404, f"service '{service_name}' not found in base scenario {base_id}"
+        )
+
+    return JSONResponse(
+        content={
+            "base_scenario_id": base_id,
+            "geojson": prov,
+            "values_table": values_dict,
+            "services_type_deficit": values_table,
+        }
+    )
+
+
+@router.get("/values_oriented_requirements_table/{scenario_id}")
+async def get_values_oriented_requirements_table(
+    scenario_id: int,
+    token: str = Depends(verify_token),
+):
+    base_id = await effects_utils.resolve_base_id(token, scenario_id)
+
+    cached = file_cache.load_latest("values_oriented_requirements", base_id)
+    if not cached:
+        raise http_exception(
+            404, f"no saved result for base scenario {base_id}", base_id
+        )
+
+    info_base = await urban_api_client.get_scenario_info(base_id, token)
+    if cached.get("meta", {}).get("scenario_updated_at") != info_base.get("updated_at"):
+        raise http_exception(
+            404, f"stale cache for base scenario {base_id}, recompute required", base_id
+        )
+
+    data: dict = cached.get("data", {})
+    values_dict = data.get("result")
+    values_table = data.get("social_values_table")
+
+    return JSONResponse(
+        content={
+            "base_scenario_id": base_id,
+            "values_table": values_dict,
+            "services_type_deficit": values_table,
+        }
+    )
 
 
 @router.get("/get_from_cache/{method_name}/{scenario_id}")
@@ -206,6 +274,7 @@ async def get_layer(scenario_id: int, method_name: str):
 
     data: dict = cached["data"]
     return JSONResponse(content=data)
+
 
 @router.get("/get_provisions/{scenario_id}")
 async def get_total_provisions(scenario_id: int):
@@ -230,13 +299,9 @@ async def get_total_provisions(scenario_id: int):
         )
 
     if provision_before and not provision_after:
-        return JSONResponse(
-            content={"provision_total_before": provision_before}
-        )
+        return JSONResponse(content={"provision_total_before": provision_before})
 
     if provision_after and not provision_before:
-        return JSONResponse(
-            content={"provision_total_after": provision_after}
-        )
+        return JSONResponse(content={"provision_total_after": provision_after})
 
     raise http_exception(404, f"Result for scenario ID{scenario_id} not found")
