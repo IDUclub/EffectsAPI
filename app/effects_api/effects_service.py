@@ -30,8 +30,7 @@ from loguru import logger
 from app.effects_api.modules.scenario_service import ScenarioService
 from app.effects_api.modules.service_type_service import (
     adapt_service_types,
-    build_en_to_ru_map,
-    remap_properties_keys_in_geojson,
+    build_en_to_ru_map
 )
 
 from ..clients.urban_api_client import UrbanAPIClient
@@ -1304,12 +1303,23 @@ class EffectsService:
         ]
 
         gdf_out = test_blocks_with_services[base_cols + service_cols + [geom_col]]
-        gdf_out = gdf_out.to_crs(crs="EPSG:4326")
+        gdf_out = gdf_out.to_crs("EPSG:4326")
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
-        geojson = json.loads(gdf_out.to_json())
+
         service_types = await self.urban_api_client.get_service_types()
         en2ru = await build_en_to_ru_map(service_types)
-        geojson = await remap_properties_keys_in_geojson(geojson, en2ru)
+        rename_map = {k: v for k, v in en2ru.items() if k in gdf_out.columns}
+        if rename_map:
+            gdf_out = gdf_out.rename(columns=rename_map)
+
+        non_geom = [c for c in gdf_out.columns if c != geom_col]
+        non_geom_sorted = sorted(non_geom, key=lambda s: s.casefold())
+        pin_first = [c for c in ["is_project"] if c in non_geom_sorted]
+        rest = [c for c in non_geom_sorted if c not in pin_first]
+        gdf_out = gdf_out[pin_first + rest + [geom_col]]
+
+        geojson_str = gdf_out.to_json()
+        geojson = json.loads(geojson_str)
 
         self.cache.save(
             "values_transformation",
@@ -1318,7 +1328,6 @@ class EffectsService:
             geojson,
             scenario_updated_at=updated_at,
         )
-
         return geojson
 
     def _get_value_level(self, provisions: list[float | None]) -> float:
