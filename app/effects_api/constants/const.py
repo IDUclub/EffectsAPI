@@ -139,3 +139,15 @@ MAX_EVALS = 25
 
 #Maximum number of runs for optimization
 MAX_RUNS = 25
+
+PRED_VALUE_RU = {
+    "urban": "Жилой или смешанный (бизнес)",
+    "industrial": "Промышленный",
+    "non_urban": "Рекреация",
+}
+
+PROB_COLS_EN_TO_RU = {
+    "prob_urban": "Вероятность жилого или бизнес видов использования, %",
+    "prob_non_urban": "Вероятность рекреационного вида использования, %",
+    "prob_industrial": "Вероятность промышленного вида использования, %",
+}

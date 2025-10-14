@@ -32,12 +32,14 @@ from app.effects_api.modules.service_type_service import (
     build_en_to_ru_map,
     remap_properties_keys_in_geojson,
 )
+from .modules.land_use_prediction_adapter import LandUsePredictorAdapter
 
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords, gdf_join_on_block_id, \
+    safe_gdf_to_geojson
 from .constants.const import (
     INFRASTRUCTURES_WEIGHTS,
     LAND_USE_RULES,
@@ -73,12 +75,14 @@ class EffectsService:
         urban_api_client: UrbanAPIClient,
         cache: FileCache,
         scenario_service: ScenarioService,
+        lu_predictor: LandUsePredictorAdapter
     ):
         self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
         self.urban_api_client = urban_api_client
         self.cache = cache
         self.scenario = scenario_service
+        self.lu_predictor = lu_predictor
 
     async def build_hash_params(
         self,
@@ -1194,7 +1198,6 @@ class EffectsService:
         )
 
         after_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=False)
-        after_blocks.to_pickle("blocks_for_prediction.pkl")
         if "block_id" in after_blocks.columns:
             after_blocks["block_id"] = after_blocks["block_id"].astype(int)
             if after_blocks.index.name == "block_id":
@@ -1304,11 +1307,40 @@ class EffectsService:
         ]
 
         gdf_out = test_blocks_with_services[base_cols + service_cols + [geom_col]]
+
+        try:
+            lu_pred = self.lu_predictor.predict(after_blocks)
+            logger.info(f"{lu_pred.columns}")
+
+            keep_cols = ["pred_name", "prob_urban", "prob_non_urban", "prob_industrial"]
+            lu_pred = lu_pred[keep_cols].copy()
+
+            # gdf_out = gdf_join_on_block_id(gdf_out, lu_pred.reset_index())
+            gdf_out = gdf_out.join(lu_pred, how="left")
+
+            logger.info(
+                "Attached land-use predictions to gdf_out, rows={}, cols={}",
+                len(lu_pred), keep_cols
+            )
+        except Exception as e:
+            logger.exception("Failed to attach land-use predictions: {}", e)
+
         gdf_out = gdf_out.to_crs(crs="EPSG:4326")
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
+
         geojson = json.loads(gdf_out.to_json())
+
         service_types = await self.urban_api_client.get_service_types()
         en2ru = await build_en_to_ru_map(service_types)
+
+
+        # en2ru.update({
+        #   "pred_name": "pred_name",
+        #   "prob_urban": "prob_urban",
+        #   "prob_non_urban": "prob_non_urban",
+        #   "prob_industrial": "prob_industrial",
+        # })
+
         geojson = await remap_properties_keys_in_geojson(geojson, en2ru)
 
         self.cache.save(
@@ -1319,6 +1351,7 @@ class EffectsService:
             scenario_updated_at=updated_at,
         )
 
+        logger.info("Values transformed complete (with land-use predictions)")
         return geojson
 
     def _get_value_level(self, provisions: list[float | None]) -> float:
