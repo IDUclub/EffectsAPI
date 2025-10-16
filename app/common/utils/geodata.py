@@ -3,6 +3,7 @@ import json
 
 import geopandas as gpd
 import pandas as pd
+from loguru import logger
 from shapely.geometry.base import BaseGeometry
 from shapely.wkt import dumps, loads
 
@@ -26,6 +27,28 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
     )
 
     return json.loads(gdf_copy.to_json(drop_id=True))
+
+def safe_gdf_to_geojson(
+    gdf: gpd.GeoDataFrame,
+    *,
+    to_epsg: int = 4326,
+    round_ndigits: int = 6,
+    drop_cols: tuple[str, ...] = (),
+) -> dict:
+    """Project, round, sanitize and serialize GeoDataFrame to GeoJSON.
+
+    Steps:
+    - Drop unwanted columns (e.g., non-serializable).
+    - Project to EPSG (default 4326).
+    - Round geometry coordinates to given precision.
+    - Ensure all properties are JSON-serializable.
+    - Return parsed dict (FeatureCollection).
+    """
+    logger.info("Serializing GeoDataFrame to GeoJSON (EPSG:%s, round=%d)", to_epsg, round_ndigits)
+    gdf2 = gdf.drop(columns=[c for c in drop_cols if c in gdf.columns]).copy()
+    gdf2 = gdf2.to_crs(to_epsg)
+    gdf2.geometry = round_coords(gdf2.geometry, round_ndigits)
+    return json.loads(gdf2.to_json(drop_id=True))
 
 
 def fc_to_gdf(fc: dict) -> gpd.GeoDataFrame:
@@ -74,3 +97,35 @@ async def get_best_functional_zones_source(
             return int(rows["year"].max()), s
 
     raise http_exception(404, "No available functional zone sources to choose from")
+
+def gdf_join_on_block_id(left: gpd.GeoDataFrame, right: pd.DataFrame, how: str = "left") -> gpd.GeoDataFrame:
+    """Join two frames by block_id index safely.
+
+    - Ensures both indices are int.
+    - Keeps geometry from the left GeoDataFrame.
+    """
+    gdf = left.copy()
+    gdf.index = gdf.index.astype(int)
+    r = right.copy()
+    r.index = r.index.astype(int)
+    return gdf.join(r, how=how)
+
+
+def _ensure_block_index(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Ensure index is integer 'block_id'."""
+    if "block_id" in gdf.columns:
+        gdf = gdf.copy()
+        gdf["block_id"] = gdf["block_id"].astype(int)
+        if gdf.index.name == "block_id":
+            gdf = gdf.reset_index(drop=True)
+        gdf = (
+            gdf.drop_duplicates(subset="block_id", keep="last")
+            .set_index("block_id")
+            .sort_index()
+        )
+    else:
+        gdf = gdf.copy()
+        gdf.index = gdf.index.astype(int)
+        gdf = gdf[~gdf.index.duplicated(keep="last")].sort_index()
+    gdf.index.name = "block_id"
+    return gdf

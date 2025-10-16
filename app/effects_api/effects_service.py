@@ -5,6 +5,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
+from blocksnet.analysis.land_use.prediction import SpatialClassifier
 from blocksnet.analysis.provision import competitive_provision, provision_strong_total
 from blocksnet.blocks.aggregation import aggregate_objects
 from blocksnet.blocks.assignment import assign_land_use
@@ -14,10 +15,9 @@ from blocksnet.machine_learning.regression import DensityRegressor, SocialRegres
 from blocksnet.optimization.services import (
     AreaSolution,
     Facade,
-    SimpleChooser,
     TPEOptimizer,
     WeightedConstraints,
-    WeightedObjective,
+    WeightedObjective, GradientChooser,
 )
 from blocksnet.relations import (
     calculate_accessibility_matrix,
@@ -30,19 +30,22 @@ from loguru import logger
 from app.effects_api.modules.scenario_service import ScenarioService
 from app.effects_api.modules.service_type_service import (
     adapt_service_types,
-    build_en_to_ru_map
+    build_en_to_ru_map,
+    remap_properties_keys_in_geojson,
 )
 
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.dto.models import SourceYear
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords, _ensure_block_index
 from .constants.const import (
     INFRASTRUCTURES_WEIGHTS,
     LAND_USE_RULES,
     MAX_EVALS,
     MAX_RUNS,
+    PRED_VALUE_RU,
+    PROB_COLS_EN_TO_RU,
 )
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -375,14 +378,14 @@ class EffectsService:
             blocks_services["capacity"] = (
                 blocks_services["capacity"].fillna(0).astype(int)
             )
-            blocks_services["objects_count"] = (
-                blocks_services["objects_count"].fillna(0).astype(int)
+            blocks_services["count"] = (
+                blocks_services["count"].fillna(0).astype(int)
             )
             blocks = blocks.join(
                 blocks_services.drop(columns=["geometry"]).rename(
                     columns={
                         "capacity": f"capacity_{service_type}",
-                        "objects_count": f"count_{service_type}",
+                        "count": f"count_{service_type}",
                     }
                 )
             )
@@ -1028,11 +1031,11 @@ class EffectsService:
         tpe_optimizer = TPEOptimizer(
             objective=objective,
             constraints=constraints,
-            vars_chooser=SimpleChooser(facade),
+            vars_chooser=GradientChooser(facade, facade.num_params, num_top=5),
         )
 
         best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=MAX_RUNS, timeout=60000, initial_runs_num=1
+            max_runs=MAX_RUNS, timeout=4*60, initial_runs_num=1
         )
 
         prov_gdfs_after = {}
@@ -1303,23 +1306,64 @@ class EffectsService:
         ]
 
         gdf_out = test_blocks_with_services[base_cols + service_cols + [geom_col]]
-        gdf_out = gdf_out.to_crs("EPSG:4326")
+
+        try:
+            logger.info("Running land-use prediction on 'after_blocks'")
+
+            ab = after_blocks[after_blocks.geometry.notna() & ~after_blocks.geometry.is_empty].copy()
+            ab.geometry = ab.geometry.buffer(0)
+
+            try:
+                utm_crs = ab.estimate_utm_crs()
+                ab = ab.to_crs(utm_crs)
+            except Exception:
+                ab = ab.to_crs("EPSG:3857")
+
+            clf = SpatialClassifier.default()
+            lu = clf.run(ab)
+
+            lu = lu.drop(columns=["category"], errors="ignore")
+
+            keep_cols = ["pred_name", "prob_urban", "prob_non_urban", "prob_industrial"]
+            for c in keep_cols:
+                if c not in lu.columns:
+                    lu[c] = np.nan
+            lu = lu[keep_cols]
+
+            lu = _ensure_block_index(lu)
+            gdf_out = _ensure_block_index(gdf_out)
+            gdf_out = gdf_out.join(lu, how="left")
+
+            logger.info("Attached land-use predictions to gdf_out (cols: {})", keep_cols)
+
+            if "pred_name" in gdf_out.columns:
+                gdf_out["Предсказанный вид использования"] = (
+                    gdf_out["pred_name"]
+                    .str.lower()
+                    .map(PRED_VALUE_RU)
+                    .fillna(gdf_out["pred_name"])
+                )
+                gdf_out = gdf_out.drop(columns=["pred_name"])
+
+            prob_cols = [c for c in ["prob_urban", "prob_non_urban", "prob_industrial"] if c in gdf_out.columns]
+            for col in prob_cols:
+                gdf_out[col] = gdf_out[col].astype(float).round(1)
+
+            rename_map = {k: v for k, v in PROB_COLS_EN_TO_RU.items() if k in gdf_out.columns}
+            gdf_out = gdf_out.rename(columns=rename_map)
+
+        except Exception as e:
+            raise http_exception(500, "Failed to attach land-use predictions: {}", e)
+
+        gdf_out = gdf_out.to_crs(crs="EPSG:4326")
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
+
+        geojson = json.loads(gdf_out.to_json())
 
         service_types = await self.urban_api_client.get_service_types()
         en2ru = await build_en_to_ru_map(service_types)
-        rename_map = {k: v for k, v in en2ru.items() if k in gdf_out.columns}
-        if rename_map:
-            gdf_out = gdf_out.rename(columns=rename_map)
 
-        non_geom = [c for c in gdf_out.columns if c != geom_col]
-        non_geom_sorted = sorted(non_geom, key=lambda s: s.casefold())
-        pin_first = [c for c in ["is_project"] if c in non_geom_sorted]
-        rest = [c for c in non_geom_sorted if c not in pin_first]
-        gdf_out = gdf_out[pin_first + rest + [geom_col]]
-
-        geojson_str = gdf_out.to_json()
-        geojson = json.loads(geojson_str)
+        geojson = await remap_properties_keys_in_geojson(geojson, en2ru)
 
         self.cache.save(
             "values_transformation",
@@ -1328,6 +1372,8 @@ class EffectsService:
             geojson,
             scenario_updated_at=updated_at,
         )
+
+        logger.info("Values transformed complete (with land-use predictions)")
         return geojson
 
     def _get_value_level(self, provisions: list[float | None]) -> float:
