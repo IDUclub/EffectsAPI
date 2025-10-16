@@ -135,10 +135,10 @@ ROADS_ID = 26
 WATER_ID = 4
 
 #Maximum number of function evaluations
-MAX_EVALS = 25
+MAX_EVALS = 1000
 
 #Maximum number of runs for optimization
-MAX_RUNS = 25
+MAX_RUNS = 1000
 
 PRED_VALUE_RU = {
     "urban": "Жилой или смешанный (бизнес)",

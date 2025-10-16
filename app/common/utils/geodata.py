@@ -109,3 +109,23 @@ def gdf_join_on_block_id(left: gpd.GeoDataFrame, right: pd.DataFrame, how: str =
     r = right.copy()
     r.index = r.index.astype(int)
     return gdf.join(r, how=how)
+
+
+def _ensure_block_index(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Ensure index is integer 'block_id'."""
+    if "block_id" in gdf.columns:
+        gdf = gdf.copy()
+        gdf["block_id"] = gdf["block_id"].astype(int)
+        if gdf.index.name == "block_id":
+            gdf = gdf.reset_index(drop=True)
+        gdf = (
+            gdf.drop_duplicates(subset="block_id", keep="last")
+            .set_index("block_id")
+            .sort_index()
+        )
+    else:
+        gdf = gdf.copy()
+        gdf.index = gdf.index.astype(int)
+        gdf = gdf[~gdf.index.duplicated(keep="last")].sort_index()
+    gdf.index.name = "block_id"
+    return gdf
