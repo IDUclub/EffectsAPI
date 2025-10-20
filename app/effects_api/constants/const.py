@@ -1,3 +1,5 @@
+from blocksnet.analysis.indicators.socio_economic import GeneralIndicator, DemographicIndicator, TransportIndicator, \
+    EngineeringIndicator, SocialCountIndicator, SocialProvisionIndicator, SocialIndicator
 from blocksnet.enums import LandUse
 
 # UrbanDB to Blocksnet land use types mapping
@@ -150,4 +152,26 @@ PROB_COLS_EN_TO_RU = {
     "prob_urban": "Вероятность жилого или бизнес видов использования, %",
     "prob_non_urban": "Вероятность рекреационного вида использования, %",
     "prob_industrial": "Вероятность промышленного вида использования, %",
+}
+
+SOCIAL_INDICATORS_MAPPING = {
+    SocialIndicator.EXTRACURRICULAR: [23, 24],
+    SocialIndicator.AMBULANCE: [39, 40],
+    SocialIndicator.SPECIAL_MEDICAL: [41],
+    SocialIndicator.PREVENTIVE_MEDICAL: [42],
+    SocialIndicator.GYM: [68],
+    SocialIndicator.ORPHANAGE: [46],
+    SocialIndicator.SOCIAL_SERVICE_CENTER: [43],
+    SocialIndicator.CULTURAL_CENTER: [49],
+    SocialIndicator.CONCERT_HALL: [53],
+    SocialIndicator.ICE_ARENA: [60],
+    SocialIndicator.ECO_TRAIL: [72],
+    SocialIndicator.FIRE_STATION: [79],
+    SocialIndicator.TOURIST_BASE: [112],
+}
+
+INDICATORS_MAPPING = {
+    GeneralIndicator.AREA : 1,
+    GeneralIndicator.URBANIZATION : 123,
+    SocialCountIndicator.BANK : 246,
 }
