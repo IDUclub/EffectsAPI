@@ -127,3 +127,15 @@ async def get_context_services(
     gdf = gdf.to_crs(gdf.estimate_utm_crs())
     gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
     return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
+
+
+async def get_context_territories(project_id : int, token: str, client: UrbanAPIClient) -> gpd.GeoDataFrame:
+    project = await client.get_all_project_info(project_id, token)
+    context_ids = project['properties']['context']
+    data = [{
+        'parent': territory_id,
+        'geometry': await client.get_territory_geometry(territory_id)
+    } for territory_id in context_ids]
+    gdf = gpd.GeoDataFrame(data=data, crs=4326)
+    return gdf
+

@@ -91,3 +91,12 @@ async def get_socio_economic_prediction(
 #     token: str = Depends(verify_token),
 # ):
 #     return await effects_service.values_oriented_requirements(token, params)
+
+@f_22_router.get(
+    "/scenario_f_22"
+)
+async def get_socio_economic_prediction_new(
+    params: Annotated[SocioEconomicByScenarioDTO, Depends(SocioEconomicByScenarioDTO)],
+    token: str = Depends(verify_token),
+):
+    return await effects_service.evaluate_social_economical_metrics(params, token)

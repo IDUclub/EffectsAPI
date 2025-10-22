@@ -401,3 +401,9 @@ class UrbanAPIClient:
     async def get_social_values_info(self) -> dict[int, str]:
         res = await self.json_handler.get("/api/v1/social_values")
         return {item["soc_value_id"]: item["name"] for item in res}
+
+    async def get_territory_normatives(self, territory_id: int):
+        res = await self.json_handler.get(f'/api/v1/territory/{territory_id}/normatives', params={'last_only': True})
+        df = pd.DataFrame(res)
+        df['service_type_id'] = df['service_type'].apply(lambda st: st['id'])
+        return df.set_index('service_type_id', drop=True)
