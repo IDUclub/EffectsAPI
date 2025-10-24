@@ -47,7 +47,7 @@ from .constants.const import (
     MAX_EVALS,
     MAX_RUNS,
     PRED_VALUE_RU,
-    PROB_COLS_EN_TO_RU, SOCIAL_INDICATORS_MAPPING, ROADS_ID, INDICATORS_MAPPING,
+    PROB_COLS_EN_TO_RU, SOCIAL_INDICATORS_MAPPING, ROADS_ID, INDICATORS_MAPPING, SERVICE_TYPES_MAPPING,
 )
 from .dto.development_dto import (
     ContextDevelopmentDTO,
@@ -1409,34 +1409,34 @@ class EffectsService:
                 project_id, token
             )
 
-            def _truthy_is_based(x):
-                v = x.get("is_based")
-                return (
-                    v is True or v == 1 or (isinstance(v, str) and v.lower() == "true")
-                )
-
-            def _parent_id(x):
-                p = x.get("parent_scenario")
-                return p.get("id") if isinstance(p, dict) else p
-
-            def _sid(x):
-                try:
-                    return int(x.get("scenario_id"))
-                except Exception:
-                    return None
+            # def _truthy_is_based(x):
+            #     v = x.get("is_based")
+            #     return (
+            #         v is True or v == 1 or (isinstance(v, str) and v.lower() == "true")
+            #     )
+            #
+            # def _parent_id(x):
+            #     p = x.get("parent_scenario")
+            #     return p.get("id") if isinstance(p, dict) else p
+            #
+            # def _sid(x):
+            #     try:
+            #         return int(x.get("scenario_id"))
+            #     except Exception:
+            #         return None
 
             matches = [
                 s
                 for s in proj_scenarios
-                if _truthy_is_based(s)
-                and _parent_id(s) == regional_id
-                and _sid(s) is not None
+                if self.effects_utils.truthy_is_based(s)
+                   and self.effects_utils.parent_id(s) == regional_id
+                   and self.effects_utils.sid(s) is not None
             ]
             if not matches:
                 only_based = [
                     s
                     for s in proj_scenarios
-                    if _truthy_is_based(s) and _sid(s) is not None
+                    if self.effects_utils.truthy_is_based(s) and self.effects_utils.sid(s) is not None
                 ]
                 if only_based:
                     only_based.sort(
@@ -1455,7 +1455,7 @@ class EffectsService:
                     ),
                     reverse=True,
                 )
-                base_id = _sid(matches[0])
+                base_id = self.effects_utils.sid(matches[0])
 
         if base_id is None:
             base_id = params.scenario_id
@@ -1639,169 +1639,283 @@ class EffectsService:
 
         return result_df
 
-    async def evaluate_social_economical_metrics(
-        self,
-        params: SocioEconomicByScenarioDTO,
-        token: str
+    # async def evaluate_social_economical_metrics(
+    #     self,
+    #     params: SocioEconomicByScenarioDTO | SocioEconomicByProjectDTO,
+    #     token: str
+    #
+    # ):
+    #     method_name = "territory_transformation"
+    #
+    #     # info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+    #     # updated_at = info["updated_at"]
+    #     # project_id = info["project"]["project_id"]
+    #     # base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id)
+    #     #
+    #     # params = await self.get_optimal_func_zone_data(params, token)
+    #     #
+    #     # params_for_hash = await self.build_hash_params(params, token)
+    #     # phash = self.cache.params_hash(params_for_hash)
+    #     #
+    #     # force = getattr(params, "force", False)
+    #     # cached = (
+    #     #     None if force else self.cache.load(method_name, params.scenario_id, phash)
+    #     # )
+    #     # if (
+    #     #         cached
+    #     #         and cached["meta"]["scenario_updated_at"] == updated_at
+    #     #         and "before" in cached["data"]
+    #     # ):
+    #     #     return {
+    #     #         n: fc_to_gdf(fc)
+    #     #         for n, fc in cached["data"]["before"].items()
+    #     #         if is_fc(fc)
+    #     #     }
+    #     #
+    #     # logger.info("Cache stale, missing or forced: calculating BEFORE")
+    #     if params.scenario_id:
+    #         project_id = (
+    #             await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+    #         )["project"]["project_id"]
+    #         territory_id = (
+    #             await self.urban_api_client.get_all_project_info(project_id, token)
+    #         )["territory"]["id"]
+    #     else:
+    #         territory_id = (
+    #             await self.urban_api_client.get_all_project_info(params.project_id, token)
+    #         )["territory"]["id"]
+    #         project_id = params.project_id
+    #
+    #     normatives = (await self.urban_api_client.get_territory_normatives(territory_id))[[
+    #         'radius_availability_meters',
+    #         'time_availability_minutes',
+    #         'services_per_1000_normative',
+    #         'services_capacity_per_1000_normative',
+    #     ]].copy()
+    #
+    #     if params.regional_scenario_id and params.project_id:
+    #         project_info = await self.urban_api_client.get_all_project_info(
+    #             project_id, token
+    #         )
+    #         proj_scenarios = await self.urban_api_client.get_project_scenarios(
+    #             project_id, token
+    #         )
+    #
+    #     context_territories_gdf = await get_context_territories(project_id, token, self.urban_api_client)
+    #
+    #     service_types = await self.urban_api_client.get_service_types()
+    #     service_types = await adapt_service_types(service_types, self.urban_api_client)
+    #     service_types = service_types[
+    #         ~service_types["infrastructure_type"].isna()
+    #     ].copy()
+    #     service_types = adapt_social_service_types_df(service_types, SOCIAL_INDICATORS_MAPPING)
+    #     service_types = service_types.join(normatives)
+    #
+    #
+    #     params = await self.get_optimal_func_zone_data(params, token)
+    #
+    #     context_blocks, _ = await self.aggregate_blocks_layer_context(
+    #         params.scenario_id, params.context_func_zone_source, params.context_func_source_year, token
+    #     )
+    #
+    #     scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
+    #         params.scenario_id, params.proj_func_zone_source, params.proj_func_source_year, token
+    #     )
+    #
+    #     before_blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(
+    #         drop=True
+    #     )
+    #
+    #     svc_cols = [c for c in before_blocks.columns if c.startswith(("count_", "capacity_"))]
+    #     if svc_cols:
+    #         before_blocks[svc_cols] = (
+    #             before_blocks[svc_cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int64")
+    #         )
+    #
+    #     before_blocks = self.effects_utils.coerce_land_use_enum(before_blocks)
+    #
+    #     # before_blocks, _ = await self.aggregate_blocks_layer_scenario(
+    #     #     params.scenario_id, params.proj_func_zone_source, params.proj_func_source_year, token
+    #     # )
+    #
+    #     # before_blocks["count_fuel"] = 0
+    #
+    #     context_territories_gdf = context_territories_gdf.to_crs(before_blocks.crs)
+    #     assign_gdf = assign_objects(before_blocks, context_territories_gdf.rename(columns={'parent': 'name'}))
+    #     before_blocks['parent'] = assign_gdf['name'].astype(int)
+    #
+    #     before_blocks = generate_blocksnet_columns(before_blocks, service_types)
+    #     before_blocks = ensure_missing_id_and_name_columns(before_blocks)
+    #
+    #     before_blocks.to_pickle("before_blocks_with_context.pkl")
+    #
+    #     service_types = service_types[~service_types['infrastructure_type'].isna()].copy()
+    #     service_types = service_types[~service_types['blocksnet'].isna()].copy()
+    #     roads_gdf = await self.urban_api_client.get_physical_objects_scenario(
+    #         params.scenario_id, token=token, physical_object_function_id=ROADS_ID)
+    #
+    #     roads_gdf = roads_gdf.to_crs(before_blocks.crs)
+    #     roads_gdf = roads_gdf.overlay(before_blocks)
+    #
+    #     try:
+    #         graph = get_accessibility_graph(before_blocks, "drive")
+    #     except Exception as e:
+    #         raise http_exception(
+    #             500, "Error generating territory graph", _detail=str(e)
+    #         )
+    #     acc_mx = calculate_accessibility_matrix(before_blocks, graph)
+    #     dist_mx = calculate_distance_matrix(before_blocks)
+    #
+    #     general_indicators = calculate_general_indicators(before_blocks)
+    #     demographic_indicators = calculate_demographic_indicators(before_blocks)
+    #     transport_indicators = calculate_transport_indicators(before_blocks, acc_mx, roads_gdf)
+    #     engineering_indicators = calculate_engineering_indicators(before_blocks)
+    #     sc_indicators, sp_indicators = calculate_social_indicators(before_blocks, acc_mx, dist_mx, service_types)
+    #
+    #     indicators_df = pd.concat([
+    #         general_indicators,
+    #         demographic_indicators,
+    #         transport_indicators,
+    #         engineering_indicators,
+    #         sc_indicators,
+    #         sp_indicators
+    #     ])
+    #
+    #     result = []
+    #     for indicator in indicators_df.index:
+    #         indicator_id = INDICATORS_MAPPING.get(indicator)
+    #         for territory_id in indicators_df.columns:
+    #             if territory_id == 'total':
+    #                 continue
+    #             value = indicators_df.loc[indicator, territory_id]
+    #             result.append({
+    #                 'territory_id': int(territory_id),
+    #                 'indicator_id': indicator_id,
+    #                 'value': value
+    #             })
+    #
+    #     long_df = (
+    #         indicators_df
+    #         .reset_index()
+    #         .rename(columns={"index": "indicator"})
+    #         .melt(id_vars=["indicator"], var_name="territory_id", value_name="value")
+    #     )
+    #
+    #     long_df = long_df[long_df["territory_id"] != "total"].copy()
+    #
+    #     long_df["indicator_id"] = long_df["indicator"].map(INDICATORS_MAPPING)
+    #
+    #     def _clean_number(v):
+    #         if v is None or (isinstance(v, float) and np.isnan(v)):
+    #             return None
+    #         try:
+    #             if isinstance(v, (np.floating, float, np.integer, int)):
+    #                 if not np.isfinite(float(v)):
+    #                     return None
+    #         except Exception:
+    #             pass
+    #         if isinstance(v, (np.integer,)):
+    #             return int(v)
+    #         if isinstance(v, (np.floating,)):
+    #             return float(v)
+    #         return v
+    #
+    #     long_df["territory_id"] = pd.to_numeric(long_df["territory_id"], errors="coerce").apply(_clean_number)
+    #     long_df["indicator_id"] = long_df["indicator_id"].apply(_clean_number)
+    #     long_df["value"] = long_df["value"].apply(_clean_number)
+    #
+    #     long_df = long_df[long_df["indicator_id"].notna() & long_df["territory_id"].notna()]
+    #     long_df = long_df.fillna(value=0)
+    #     long_df.to_pickle(" long_df.pkl")
+    #
+    #     result = long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
+    #
+    #     return result
 
-    ):
-        method_name = "territory_transformation"
-
-        # info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
-        # updated_at = info["updated_at"]
-        # project_id = info["project"]["project_id"]
-        # base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id)
-        #
-        # params = await self.get_optimal_func_zone_data(params, token)
-        #
-        # params_for_hash = await self.build_hash_params(params, token)
-        # phash = self.cache.params_hash(params_for_hash)
-        #
-        # force = getattr(params, "force", False)
-        # cached = (
-        #     None if force else self.cache.load(method_name, params.scenario_id, phash)
-        # )
-        # if (
-        #         cached
-        #         and cached["meta"]["scenario_updated_at"] == updated_at
-        #         and "before" in cached["data"]
-        # ):
-        #     return {
-        #         n: fc_to_gdf(fc)
-        #         for n, fc in cached["data"]["before"].items()
-        #         if is_fc(fc)
-        #     }
-        #
-        # logger.info("Cache stale, missing or forced: calculating BEFORE")
-
-        project_id = (
-            await self.urban_api_client.get_scenario_info(params.scenario_id, token)
-        )["project"]["project_id"]
-        territory_id = (
-            await self.urban_api_client.get_all_project_info(project_id, token)
-        )["territory"]["id"]
-        normatives = (await self.urban_api_client.get_territory_normatives(territory_id))[[
-            'radius_availability_meters',
-            'time_availability_minutes',
-            'services_per_1000_normative',
-            'services_capacity_per_1000_normative',
-        ]].copy()
-        context_territories_gdf = await get_context_territories(project_id, token, self.urban_api_client)
-
-        service_types = await self.urban_api_client.get_service_types()
-        service_types = await adapt_service_types(service_types, self.urban_api_client)
-        service_types = service_types[
-            ~service_types["infrastructure_type"].isna()
-        ].copy()
-        service_types = adapt_social_service_types_df(service_types, SOCIAL_INDICATORS_MAPPING)
-        service_types = service_types.join(normatives)
-
-
-        params = await self.get_optimal_func_zone_data(params, token)
-
-        context_blocks, _ = await self.aggregate_blocks_layer_context(
-            params.scenario_id, params.context_func_zone_source, params.context_func_source_year, token
-        )
+    async def _compute_for_single_scenario(
+            self,
+            scenario_id: int,
+            context_blocks: gpd.GeoDataFrame,
+            context_territories_gdf: gpd.GeoDataFrame,
+            service_types_df: pd.DataFrame,
+            proj_func_zone_source: Optional[str],
+            proj_func_source_year: Optional[int],
+            token: str,
+    ) -> list[dict]:
+        """
+        Compute indicators for ONE scenario with shared context.
+        Returns JSON-serializable list of records: [{territory_id, indicator_id, value}, ...]
+        """
 
         scenario_blocks, _ = await self.aggregate_blocks_layer_scenario(
-            params.scenario_id, params.proj_func_zone_source, params.proj_func_source_year, token
+            scenario_id, proj_func_zone_source, proj_func_source_year, token
         )
 
-        before_blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(
-            drop=True
-        )
+        # 2) glue context + scenario (no global fillna!)
+        before_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=True)
 
-        # НЕ глобальный fillna! только сервисные колонки заполняем нулями
+        # service columns → ints, NaN→0
         svc_cols = [c for c in before_blocks.columns if c.startswith(("count_", "capacity_"))]
         if svc_cols:
             before_blocks[svc_cols] = (
                 before_blocks[svc_cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int64")
             )
 
-        # Приводим land_use к enum LandUse
-        before_blocks = self.effects_utils.coerce_land_use_enum(before_blocks)
+        # land_use → enum
+        # before_blocks = _coerce_land_use_enum(before_blocks)
 
-        # before_blocks, _ = await self.aggregate_blocks_layer_scenario(
-        #     params.scenario_id, params.proj_func_zone_source, params.proj_func_source_year, token
-        # )
-
-        # before_blocks["count_fuel"] = 0
-
+        # parent territories
         context_territories_gdf = context_territories_gdf.to_crs(before_blocks.crs)
-        assign_gdf = assign_objects(before_blocks, context_territories_gdf.rename(columns={'parent': 'name'}))
-        before_blocks['parent'] = assign_gdf['name'].astype(int)
+        assigned = assign_objects(before_blocks, context_territories_gdf.rename(columns={"parent": "name"}))
+        before_blocks["parent"] = assigned["name"].astype(int)
 
-        before_blocks = generate_blocksnet_columns(before_blocks, service_types)
+        # aggregated blocksnet columns + ensure missing (id & name)
+        before_blocks = generate_blocksnet_columns(before_blocks, service_types_df)
         before_blocks = ensure_missing_id_and_name_columns(before_blocks)
 
-        before_blocks.to_pickle("before_blocks_with_context.pkl")
-
-        service_types = service_types[~service_types['infrastructure_type'].isna()].copy()
-        service_types = service_types[~service_types['blocksnet'].isna()].copy()
+        # 3) roads overlay for transport
         roads_gdf = await self.urban_api_client.get_physical_objects_scenario(
-            params.scenario_id, token=token, physical_object_function_id=ROADS_ID)
+            scenario_id, token=token, physical_object_function_id=ROADS_ID
+        )
+        roads_gdf = roads_gdf.to_crs(before_blocks.crs).overlay(before_blocks)
 
-        roads_gdf = roads_gdf.to_crs(before_blocks.crs)
-        roads_gdf = roads_gdf.overlay(before_blocks)
-
-        try:
-            graph = get_accessibility_graph(before_blocks, "drive")
-        except Exception as e:
-            raise http_exception(
-                500, "Error generating territory graph", _detail=str(e)
-            )
+        # 4) graph + matrices
+        graph = get_accessibility_graph(before_blocks, "drive")
         acc_mx = calculate_accessibility_matrix(before_blocks, graph)
         dist_mx = calculate_distance_matrix(before_blocks)
 
-        general_indicators = calculate_general_indicators(before_blocks)
-        demographic_indicators = calculate_demographic_indicators(before_blocks)
-        transport_indicators = calculate_transport_indicators(before_blocks, acc_mx, roads_gdf)
-        engineering_indicators = calculate_engineering_indicators(before_blocks)
-        sc_indicators, sp_indicators = calculate_social_indicators(before_blocks, acc_mx, dist_mx, service_types)
+        # 5) indicators
+        st_for_social = service_types_df[
+            service_types_df["infrastructure_type"].notna()
+            & service_types_df["blocksnet"].notna()
+            ].copy()
 
-        indicators_df = pd.concat([
-            general_indicators,
-            demographic_indicators,
-            transport_indicators,
-            engineering_indicators,
-            sc_indicators,
-            sp_indicators
-        ])
+        general = calculate_general_indicators(before_blocks)
+        demo = calculate_demographic_indicators(before_blocks)
+        transp = calculate_transport_indicators(before_blocks, acc_mx, roads_gdf)
+        eng = calculate_engineering_indicators(before_blocks)
+        sc, sp = calculate_social_indicators(before_blocks, acc_mx, dist_mx, st_for_social)
 
-        result = []
-        for indicator in indicators_df.index:
-            indicator_id = INDICATORS_MAPPING.get(indicator)
-            for territory_id in indicators_df.columns:
-                if territory_id == 'total':
-                    continue
-                value = indicators_df.loc[indicator, territory_id]
-                result.append({
-                    'territory_id': int(territory_id),
-                    'indicator_id': indicator_id,
-                    'value': value
-                })
+        indicators_df = pd.concat([general, demo, transp, eng, sc, sp])
 
+        # 6) flatten to JSON-safe
         long_df = (
-            indicators_df
-            .reset_index()
+            indicators_df.reset_index()
             .rename(columns={"index": "indicator"})
             .melt(id_vars=["indicator"], var_name="territory_id", value_name="value")
         )
-
         long_df = long_df[long_df["territory_id"] != "total"].copy()
-
         long_df["indicator_id"] = long_df["indicator"].map(INDICATORS_MAPPING)
 
         def _clean_number(v):
             if v is None or (isinstance(v, float) and np.isnan(v)):
                 return None
             try:
-                if isinstance(v, (np.floating, float, np.integer, int)):
-                    if not np.isfinite(float(v)):
-                        return None
+                if isinstance(v, (np.floating, float, np.integer, int)) and not np.isfinite(float(v)):
+                    return None
             except Exception:
                 pass
-            if isinstance(v, (np.integer,)):
+            if isinstance(v, (np.integer,)):  # numpy int -> python int
                 return int(v)
             if isinstance(v, (np.floating,)):
                 return float(v)
@@ -1810,11 +1924,67 @@ class EffectsService:
         long_df["territory_id"] = pd.to_numeric(long_df["territory_id"], errors="coerce").apply(_clean_number)
         long_df["indicator_id"] = long_df["indicator_id"].apply(_clean_number)
         long_df["value"] = long_df["value"].apply(_clean_number)
+        long_df = long_df[long_df["indicator_id"].notna() & long_df["territory_id"].notna()].fillna(0)
 
-        long_df = long_df[long_df["indicator_id"].notna() & long_df["territory_id"].notna()]
-        long_df = long_df.fillna(value=0)
-        long_df.to_pickle(" long_df.pkl")
+        return long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
 
-        result = long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
+    async def evaluate_social_economical_metrics(
+            self,
+            # params: SocioEconomicByScenarioDTO,
+            params: SocioEconomicByProjectDTO,
+            token: str,
+    ):
+        """
+        Multi-scenario mode with shared context:
+        - Build context once for the project
+        - For each scenario_id: glue (context ⊕ scenario), compute indicators by parent territories
+        - Return {scenario_id: [{territory_id, indicator_id, value}, ...]}
+        """
+        # 0) Resolve project and context once
+        # project_id = (await self.urban_api_client.get_scenario_info(params.scenario_id, token))["project"]["project_id"]
+        territory_id = (await self.urban_api_client.get_all_project_info(params.project_id, token))["territory"]["id"]
+        params = await self.get_optimal_func_zone_data(params, token)
+        # norms + service types (once)
+        normatives = (await self.urban_api_client.get_territory_normatives(territory_id))[[
+            "radius_availability_meters",
+            "time_availability_minutes",
+            "services_per_1000_normative",
+            "services_capacity_per_1000_normative",
+        ]].copy()
 
-        return result
+        service_types = await self.urban_api_client.get_service_types()
+        service_types = await adapt_service_types(service_types, self.urban_api_client)
+        service_types = service_types[service_types["infrastructure_type"].notna()].copy()
+        service_types = adapt_social_service_types_df(service_types, SOCIAL_INDICATORS_MAPPING).join(normatives)
+
+        # shared context once
+        context_blocks, _ = await self.aggregate_blocks_layer_context(
+            params.scenario_id, params.context_func_zone_source, params.context_func_source_year, token
+        )
+
+        # parent territories layer once
+        context_territories_gdf = await get_context_territories(params.project_id, token, self.urban_api_client)
+
+        # 1) list of scenarios to compute
+        scenarios = [int(params.scenario_id)]
+        if getattr(params, "project_id", None) and getattr(params, "regional_scenario_id", None):
+            all_sc = await self.urban_api_client.get_project_scenarios(int(params.project_id), token)
+            parent_id = int(params.regional_scenario_id)
+            scenarios = [int(s["scenario_id"]) for s in all_sc if
+                         (s.get("parent_scenario") or {}).get("id") == parent_id]
+
+        # 2) per-scenario compute with shared context
+        results: Dict[int, list[dict]] = {}
+        for sid in scenarios:
+            records = await self._compute_for_single_scenario(
+                sid,
+                context_blocks=context_blocks,
+                context_territories_gdf=context_territories_gdf,
+                service_types_df=service_types,
+                proj_func_zone_source=params.proj_func_zone_source,
+                proj_func_source_year=params.proj_func_source_year,
+                token=token,
+            )
+            results[sid] = records
+
+        return results

@@ -12,7 +12,7 @@ from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
 )
-from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
+from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO, SocioEconomicByProjectComputedDTO
 from .dto.socio_economic_scenario_dto import SocioEconomicByScenarioDTO
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .schemas.development_response_schema import DevelopmentResponseSchema
@@ -96,7 +96,7 @@ async def get_socio_economic_prediction(
     "/scenario_f_22"
 )
 async def get_socio_economic_prediction_new(
-    params: Annotated[SocioEconomicByScenarioDTO, Depends(SocioEconomicByScenarioDTO)],
+    params: Annotated[SocioEconomicByProjectDTO, Depends(SocioEconomicByProjectDTO)],
     token: str = Depends(verify_token),
 ):
     return await effects_service.evaluate_social_economical_metrics(params, token)
