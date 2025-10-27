@@ -1,6 +1,7 @@
 import re
 from typing import Any, Dict, Optional
 
+import numpy as np
 import pandas as pd
 from blocksnet.enums import LandUse
 from loguru import logger
@@ -61,40 +62,16 @@ class EffectsUtils:
         )
         return self.sid(matches[0]) or scenario_id
 
-    def coerce_land_use_enum(self, df: pd.DataFrame, col: str = "land_use") -> pd.DataFrame:
-        """
-        Normalize 'land_use' column to LandUse enum:
-        - Accept LandUse enum → keep
-        - Accept 'LandUse.NAME' → strip prefix, use NAME
-        - Accept 'name' values → use by value ('residential', ...)
-        - Accept 'NAME' values → use by name ('RESIDENTIAL', ...)
-        - None/NaN → keep None
-        Unknown values → None
-        """
-        if col not in df.columns:
-            return df
-
-        def _to_enum(v):
-            if v is None or (isinstance(v, float) and pd.isna(v)):
-                return None
-            if isinstance(v, LandUse):
-                return v
-            if isinstance(v, str):
-                s = v.strip()
-                m = re.match(r"^(?:LandUse\.)?([A-Za-z_]+)$", s)
-                if m:
-                    key = m.group(1)
-                    try:
-                        return LandUse[key.upper()]
-                    except KeyError:
-                        pass
-                    try:
-                        return LandUse(key.lower())
-                    except ValueError:
-                        logger.warning("Unknown land_use value: %r -> set to None", v)
-                        return None
-            logger.warning("Unsupported land_use type: %r -> set to None", type(v).__name__)
+    def clean_number(self, v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
             return None
-
-        df[col] = df[col].map(_to_enum)
-        return df
+        try:
+            if isinstance(v, (np.floating, float, np.integer, int)) and not np.isfinite(float(v)):
+                return None
+        except Exception:
+            pass
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return float(v)
+        return v

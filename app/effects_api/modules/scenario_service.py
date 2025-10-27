@@ -165,14 +165,23 @@ class ScenarioService:
         self, scenario_id: int, service_types: pd.DataFrame, token: str
     ):
         try:
-            gdf = await self.client.get_services_scenario(
+            res = await self.client.get_services_scenario(
                 scenario_id, centers_only=True, token=token
             )
+            features = res.get("features") or []
+
+            if not features:
+                logger.info(f"Scenario {scenario_id}: no services (features=[]) -> returning empty dict")
+                return {}
+
+            gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326").set_index("service_id", drop=False)
             gdf = gdf.to_crs(gdf.estimate_utm_crs())
+
             gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
-            return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
+            return {st: impute_services(g, st) for st, g in gdfs.items()}
+
         except Exception as e:
-            logger.exception(e)
+            logger.exception(f"Failed to fetch/process services for scenario {scenario_id}: {str(e)}")
             raise http_exception(
                 404,
                 f"No services found for scenario {scenario_id}",

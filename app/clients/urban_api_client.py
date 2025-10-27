@@ -154,15 +154,11 @@ class UrbanAPIClient:
 
     async def get_services_scenario(
         self, scenario_id: int, token: str, **kwargs: Any
-    ) -> gpd.GeoDataFrame:
-        res = await self.json_handler.get(
+    ) -> dict:
+        return await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/services_with_geometry",
             headers={"Authorization": f"Bearer {token}"},
             params=kwargs,
-        )
-        features = res["features"]
-        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
-            "service_id"
         )
 
     async def get_optimal_func_zone_request_data(
