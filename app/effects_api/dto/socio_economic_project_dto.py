@@ -18,12 +18,6 @@ class SocioEconomicByProjectDTO(BaseModel):
         description="Regional scenario ID using for filtering.",
     )
 
-    split: bool = Field(
-        default=False,
-        examples=[False, True],
-        description="If split will return additional evaluation for each context mo",
-    )
-
 
 class SocioEconomicByProjectComputedDTO(SocioEconomicByProjectDTO):
     context_func_zone_source: Literal["PZZ", "OSM", "User"]

@@ -102,15 +102,41 @@ class AnyTask:
 
 
 async def create_task(method: str, token: str, params, task_id: str) -> str:
-    norm_params = await effects_service.get_optimal_func_zone_data(params, token)
-    params_for_hash = await effects_service.build_hash_params(norm_params, token)
-    phash = file_cache.params_hash(params_for_hash)
+    """
+    Создание задачи для асинхронного расчёта эффектов.
+    Теперь поддерживает как сценарные (scenario_id), так и проектные (project_id) методы.
+    """
+
+    # --- Проверяем, относится ли метод к проектным ---
+    is_project_based = method in {"socio_economics", "evaluate_social_economical_metrics"}
+
+    if is_project_based:
+        norm_params = params
+        params_for_hash = {
+            "project_id": getattr(params, "project_id", None),
+            "regional_scenario_id": getattr(params, "regional_scenario_id", None),
+        }
+        phash = file_cache.params_hash(params_for_hash)
+        owner_id = getattr(params, "project_id", None)
+
+    else:
+        norm_params = await effects_service.get_optimal_func_zone_data(params, token)
+        params_for_hash = await effects_service.build_hash_params(norm_params, token)
+        phash = file_cache.params_hash(params_for_hash)
+        owner_id = norm_params.scenario_id
 
     task = AnyTask(
-        method, norm_params.scenario_id, token, norm_params, phash, file_cache, task_id
+        method,
+        owner_id,
+        token,
+        norm_params,
+        phash,
+        file_cache,
+        task_id,
     )
     _task_map[task.task_id] = task
     await _task_queue.put(task)
+
     return task.task_id
 
 

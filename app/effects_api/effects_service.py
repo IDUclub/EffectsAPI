@@ -437,7 +437,7 @@ class EffectsService:
         )
 
         best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=MAX_RUNS, timeout=4*60, initial_runs_num=1
+            max_runs=MAX_RUNS, timeout=10, initial_runs_num=1
         )
 
         prov_gdfs_after = {}
@@ -759,6 +759,12 @@ class EffectsService:
 
         gdf_out = gdf_out.to_crs(crs="EPSG:4326")
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
+        geom_col = gdf_out.geometry.name
+        non_geom = [c for c in gdf_out.columns if c != geom_col]
+        non_geom_sorted = sorted(non_geom, key=lambda s: s.casefold())
+        pin_first = [c for c in ["is_project"] if c in non_geom_sorted]
+        rest = [c for c in non_geom_sorted if c not in pin_first]
+        gdf_out = gdf_out[pin_first + rest + [geom_col]]
 
         geojson = json.loads(gdf_out.to_json())
 
@@ -766,6 +772,7 @@ class EffectsService:
         en2ru = await build_en_to_ru_map(service_types)
 
         geojson = await remap_properties_keys_in_geojson(geojson, en2ru)
+
 
         self.cache.save(
             "values_transformation",
@@ -1114,6 +1121,7 @@ class EffectsService:
 
         return long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
 
+    #FIXME починить перепутанную передачу params и token
     async def evaluate_social_economical_metrics(
             self,
             params: SocioEconomicByProjectDTO,
@@ -1124,8 +1132,8 @@ class EffectsService:
         Return: {scenario_id: [{territory_id, indicator_id, value}, ...]}
         """
 
-        project_id = int(params.project_id)
-        parent_id = int(params.regional_scenario_id)
+        project_id = params.project_id
+        parent_id = params.regional_scenario_id
 
         context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id, token)
 
@@ -1160,6 +1168,26 @@ class EffectsService:
             )
             results[sid] = records
 
-        return results
+        method_name = "evaluate_social_economical_metrics"
 
+        project_info = await self.urban_api_client.get_project(project_id, token)
+        updated_at = project_info.get("updated_at")
+
+        params_for_hash = {
+            "project_id": project_id,
+            "regional_scenario_id": parent_id,
+            "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else None,
+        }
+        phash = self.cache.params_hash(params_for_hash)
+
+        self.cache.save(
+            method_name,
+            project_id,
+            params_for_hash,
+            {"results": results},
+            scenario_updated_at=updated_at,
+        )
+
+        logger.success(f"[Effects] socio-economic metrics cached for project_id={project_id}")
+        return results
 

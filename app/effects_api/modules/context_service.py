@@ -295,14 +295,14 @@ class ContextService:
 
         cached = self.cache.load(method, project_id, phash)
         if cached:
-            logger.info("Shared context cache hit for project_id=%d", project_id)
+            logger.info(f"Shared context cache hit for project_id={project_id}")
             data = cached["data"]
             ctx_blocks = self.cache.load_gdf_artifact(Path(data["context_blocks_path"]))
             ctx_territories = self.cache.load_gdf_artifact(Path(data["context_territories_path"]))
             service_types = self.cache.load_df_artifact(Path(data["service_types_path"]))
             return ctx_blocks, ctx_territories, service_types
 
-        logger.info("Shared context cache miss for project_id=%d — building", project_id)
+        logger.info("Shared context cache miss for project_id={project_id} — building")
 
         territory_id = (await self.client.get_all_project_info(project_id, token))["territory"]["id"]
         base_sid = await self.client.get_base_scenario_id(project_id)

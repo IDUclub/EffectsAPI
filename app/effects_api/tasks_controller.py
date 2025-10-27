@@ -12,6 +12,7 @@ from app.effects_api.modules.task_service import (
     _task_map,
     _task_queue,
 )
+from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
 
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
@@ -65,7 +66,7 @@ async def get_methods():
 
 
 @router.post("/{method}", status_code=202)
-async def create_task(
+async def create_scenario_task(
     method: str,
     params: Annotated[ContextDevelopmentDTO, Depends()],
     token: str = Depends(verify_token),
@@ -108,6 +109,52 @@ async def create_task(
         await _task_queue.put(task)
 
         return {"task_id": task_id, "status": "queued"}
+
+@router.post("/project/{method}", status_code=202)
+async def create_project_task(
+    token: Annotated[str, Depends(verify_token)],
+    method: str,
+    params: Annotated[SocioEconomicByProjectDTO, Depends()],
+):
+    """
+    separate endpoint for project-based tasks (e.g., socio_economics).
+    """
+    if method not in {"socio_economics", "evaluate_social_economical_metrics"}:
+        raise http_exception(400, f"method '{method}' is not project-based", method)
+
+    project_id = params.project_id
+    regional_id = params.regional_scenario_id
+
+    params_for_hash = {
+        "project_id": project_id,
+        "regional_scenario_id": regional_id,
+        "territory_ids": getattr(params, "territory_ids", []),
+    }
+    phash = file_cache.params_hash(params_for_hash)
+    task_id = f"{method}_{project_id}_{phash}"
+
+    force = getattr(params, "force", False)
+    cached = None if force else file_cache.load(method, project_id, phash)
+    if not force and _cache_complete(method, cached):
+        return {"task_id": task_id, "status": "done"}
+
+    existing = None if force else _task_map.get(task_id)
+    if not force and existing and existing.status in {"queued", "running"}:
+        return {"task_id": task_id, "status": existing.status}
+
+    task = AnyTask(
+        method,
+        project_id,
+        token,
+        params,
+        phash,
+        file_cache,
+        task_id,
+    )
+    _task_map[task_id] = task
+    await _task_queue.put(task)
+
+    return {"task_id": task_id, "status": "queued"}
 
 
 @router.get("/status/{task_id}")
