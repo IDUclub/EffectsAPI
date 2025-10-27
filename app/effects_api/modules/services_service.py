@@ -1,5 +1,7 @@
 import geopandas as gpd
 import pandas as pd
+from blocksnet.blocks.aggregation import aggregate_objects
+from loguru import logger
 
 
 def _adapt_service_type(data: dict, service_types: pd.DataFrame) -> int:
@@ -44,3 +46,51 @@ def adapt_services(
         st: gdf[gdf["service_type"] == st].drop(columns=["service_type"])
         for st in sorted(gdf["service_type"].unique())
     }
+
+async def get_services_layer(self, scenario_id: int, token: str):
+    """
+    Fetch every service layer for a scenario, aggregate counts/capacities
+    into the scenario blocks and return the resulting block layer.
+
+    Params:
+    scenario_id : int
+        Scenario whose services are queried and aggregated.
+
+    Returns:
+    gpd.GeoDataFrame
+        Scenario block layer with additional columns
+        `capacity_<service_type>` and `count_<service_type>` for each
+        detected service category.
+    """
+    blocks = await self.scenario.get_scenario_blocks(scenario_id, token)
+    blocks_crs = blocks.crs
+    logger.info(
+        f"{len(blocks)} START blocks layer scenario{scenario_id}, CRS: {blocks.crs}"
+    )
+    service_types = await self.urban_api_client.get_service_types()
+    logger.info(f"{service_types}")
+    services_dict = await self.scenario.get_scenario_services(
+        scenario_id, service_types, token
+    )
+
+    for service_type, services in services_dict.items():
+        services = services.to_crs(blocks_crs)
+        blocks_services, _ = aggregate_objects(blocks, services)
+        blocks_services["capacity"] = (
+            blocks_services["capacity"].fillna(0).astype(int)
+        )
+        blocks_services["count"] = (
+            blocks_services["count"].fillna(0).astype(int)
+        )
+        blocks = blocks.join(
+            blocks_services.drop(columns=["geometry"]).rename(
+                columns={
+                    "capacity": f"capacity_{service_type}",
+                    "count": f"count_{service_type}",
+                }
+            )
+        )
+    logger.info(
+        f"{len(blocks)} SERVICES blocks layer scenario {scenario_id}, CRS: {blocks.crs}"
+    )
+    return blocks

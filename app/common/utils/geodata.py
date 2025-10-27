@@ -30,7 +30,6 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
 
 def safe_gdf_to_geojson(
     gdf: gpd.GeoDataFrame,
-    *,
     to_epsg: int = 4326,
     round_ndigits: int = 6,
     drop_cols: tuple[str, ...] = (),
@@ -44,7 +43,7 @@ def safe_gdf_to_geojson(
     - Ensure all properties are JSON-serializable.
     - Return parsed dict (FeatureCollection).
     """
-    logger.info("Serializing GeoDataFrame to GeoJSON (EPSG:%s, round=%d)", to_epsg, round_ndigits)
+    logger.info(f"Serializing GeoDataFrame to GeoJSON (EPSG:{to_epsg}, round={round_ndigits})")
     gdf2 = gdf.drop(columns=[c for c in drop_cols if c in gdf.columns]).copy()
     gdf2 = gdf2.to_crs(to_epsg)
     gdf2.geometry = round_coords(gdf2.geometry, round_ndigits)

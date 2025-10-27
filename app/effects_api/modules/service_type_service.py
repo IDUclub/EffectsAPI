@@ -231,7 +231,6 @@ def _build_name_maps(service_types_df: pd.DataFrame) -> tuple[dict[str, int], di
 
 def _rename_non_id_columns_to_ids(
     df: pd.DataFrame,
-    *,
     name_to_id: dict[str, int],
     blocksnet_to_id: dict[str, int],
     prefixes: Iterable[str],
@@ -256,7 +255,7 @@ def _rename_non_id_columns_to_ids(
             if sid is not None:
                 rename_map[col] = f"{pref}{sid}"
             else:
-                logger.warning("No service_id mapping found for column '%s'", col)
+                logger.warning(f"No service_id mapping found for column '{col}")
             break
 
     if rename_map:
@@ -265,7 +264,6 @@ def _rename_non_id_columns_to_ids(
 
 def ensure_missing_id_and_name_columns(
     blocks_gdf: gpd.GeoDataFrame,
-    *,
     count_prefix: str = "count",
     capacity_prefix: str = "capacity",
 ) -> gpd.GeoDataFrame:
@@ -319,7 +317,6 @@ def ensure_missing_id_and_name_columns(
 def generate_blocksnet_columns(
     blocks_gdf: gpd.GeoDataFrame,
     service_types_df: pd.DataFrame,
-    *,
     count_prefix: str = "count",
     capacity_prefix: str = "capacity",
     strict: bool = False,

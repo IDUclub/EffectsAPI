@@ -16,6 +16,7 @@ TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
     "values_transformation": effects_service.values_transformation,
     "values_oriented_requirements": effects_service.values_oriented_requirements,
+    "socio_economics": effects_service.evaluate_social_economical_metrics,
 }
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()

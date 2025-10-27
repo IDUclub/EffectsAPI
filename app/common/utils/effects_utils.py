@@ -3,8 +3,8 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
-from blocksnet.enums import LandUse
-from loguru import logger
+from blocksnet.optimization.services import AreaSolution, Facade
+import geopandas as gpd
 
 from app.clients.urban_api_client import UrbanAPIClient
 
@@ -75,3 +75,37 @@ class EffectsUtils:
         if isinstance(v, (np.floating,)):
             return float(v)
         return v
+
+    def build_facade(
+        self,
+        after_blocks: gpd.GeoDataFrame,
+        acc_mx: pd.DataFrame,
+        service_types: pd.DataFrame,
+    ) -> Facade:
+        blocks_lus = after_blocks.loc[after_blocks["is_project"], "land_use"]
+        blocks_lus = blocks_lus[~blocks_lus.isna()].to_dict()
+
+        var_adapter = AreaSolution(blocks_lus)
+
+        facade = Facade(
+            blocks_lu=blocks_lus,
+            blocks_df=after_blocks,
+            accessibility_matrix=acc_mx,
+            var_adapter=var_adapter,
+        )
+
+        for st_id, row in service_types.iterrows():
+            st_name = row["name"]
+            st_weight = row["infrastructure_weight"]
+            st_column = f"capacity_{st_name}"
+
+            if st_column in after_blocks.columns:
+                df = after_blocks.rename(columns={st_column: "capacity"})[
+                    ["capacity"]
+                ].fillna(0)
+            else:
+                df = after_blocks[[]].copy()
+                df["capacity"] = 0
+            facade.add_service_type(st_name, st_weight, df)
+
+        return facade
