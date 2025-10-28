@@ -112,14 +112,14 @@ async def create_scenario_task(
 
 @router.post("/project/{method}", status_code=202)
 async def create_project_task(
-    token: Annotated[str, Depends(verify_token)],
     method: str,
     params: Annotated[SocioEconomicByProjectDTO, Depends()],
+    token: Annotated[str, Depends(verify_token)]
 ):
     """
     separate endpoint for project-based tasks (e.g., socio_economics).
     """
-    if method not in {"socio_economics", "evaluate_social_economical_metrics"}:
+    if method not in {"social_economical_metrics"}:
         raise http_exception(400, f"method '{method}' is not project-based", method)
 
     project_id = params.project_id

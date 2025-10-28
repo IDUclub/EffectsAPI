@@ -12,9 +12,8 @@ from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
 )
-from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO, SocioEconomicByProjectComputedDTO
+from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
 from .dto.socio_economic_scenario_dto import SocioEconomicByScenarioDTO
-from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .schemas.development_response_schema import DevelopmentResponseSchema
 from .schemas.socio_economic_response_schema import SocioEconomicResponseSchema
 
@@ -63,34 +62,6 @@ async def get_socio_economic_prediction(
     token: str = Depends(verify_token),
 ) -> SocioEconomicResponseSchema:
     return await effects_service.evaluate_master_plan_by_scenario(params, token)
-
-
-# @f_35_router.get("/territory_transformation")
-# async def territory_transformation(
-#     params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
-#     token: str = Depends(verify_token),
-# ):
-#     gdf = await effects_service.territory_transformation_scenario_before(token, params)
-#     gdf = gdf.to_crs(4326)
-#
-#     geojson_dict = json.loads(gdf.to_json(drop_id=True))
-#     return JSONResponse(content=geojson_dict)
-#
-#
-# @f_26_router.get("/values_development")
-# async def values_development(
-#     params: Annotated[ContextDevelopmentDTO, Depends(ContextDevelopmentDTO)],
-#     token: str = Depends(verify_token),
-# ):
-#     return await effects_service.values_transformation(token, params)
-#
-#
-# @f_36_router.get("/values_oriented_requirements")
-# async def values_requirements(
-#     params: Annotated[TerritoryTransformationDTO, Depends(TerritoryTransformationDTO)],
-#     token: str = Depends(verify_token),
-# ):
-#     return await effects_service.values_oriented_requirements(token, params)
 
 @f_22_router.get(
     "/scenario_f_22"

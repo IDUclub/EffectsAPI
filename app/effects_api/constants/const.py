@@ -311,3 +311,5 @@ INDICATORS_MAPPING = {
     SocialCountIndicator.CATERING: 344,
     SocialProvisionIndicator.CATERING: 226 # Обеспеченность кафе / кофейнями
 }
+
+SPEED = 5 * 1_000 / 60

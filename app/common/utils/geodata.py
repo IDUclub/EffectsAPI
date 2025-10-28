@@ -3,12 +3,13 @@ import json
 
 import geopandas as gpd
 import pandas as pd
+from blocksnet.relations import calculate_distance_matrix
 from loguru import logger
 from shapely.geometry.base import BaseGeometry
 from shapely.wkt import dumps, loads
 
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.effects_api.constants.const import COL_RU
+from app.effects_api.constants.const import COL_RU, SPEED, ROADS_ID
 from app.effects_api.modules.scenario_service import SOURCES_PRIORITY
 
 
@@ -128,3 +129,31 @@ def _ensure_block_index(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         gdf = gdf[~gdf.index.duplicated(keep="last")].sort_index()
     gdf.index.name = "block_id"
     return gdf
+
+def get_accessibility_matrix(blocks : gpd.GeoDataFrame) -> pd.DataFrame:
+  crs = blocks.estimate_utm_crs()
+  dist_mx = calculate_distance_matrix(blocks.to_crs(crs))
+  return dist_mx // SPEED
+
+
+async def _roads_overlay_fast(self, scenario_id: int, token: str, target_crs, bounds):
+    """
+    Try to clip by bbox first, then lighter op than overlay. Offload to executor.
+    """
+    logger.info(f"Fetching roads for scenario_id={scenario_id}")
+    roads_gdf = await self.urban_api_client.get_physical_objects_scenario(
+        scenario_id, token=token, physical_object_function_id=ROADS_ID
+    )
+    if roads_gdf.crs != target_crs:
+        roads_gdf = roads_gdf.to_crs(target_crs)
+
+    minx, miny, maxx, maxy = bounds
+    roads_gdf = roads_gdf.cx[minx:maxx, miny:maxy]
+
+    def _clip():
+        try:
+            return roads_gdf
+        except Exception:
+            return roads_gdf
+
+    return await self._to_executor(_clip)

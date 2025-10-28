@@ -34,7 +34,8 @@ from .modules.context_service import ContextService
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords, _ensure_block_index
+from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords, _ensure_block_index, \
+    get_accessibility_matrix
 from .constants.const import (
     INFRASTRUCTURES_WEIGHTS,
     MAX_EVALS,
@@ -237,13 +238,7 @@ class EffectsService:
             before_blocks["is_project"] = (
                 before_blocks["is_project"].fillna(False).astype(bool)
             )
-        try:
-            graph = get_accessibility_graph(before_blocks, "intermodal")
-        except Exception as e:
-            raise http_exception(
-                500, "Error generating territory graph", _detail=str(e)
-            )
-        acc_mx = calculate_accessibility_matrix(before_blocks, graph)
+        acc_mx = get_accessibility_matrix(before_blocks)
 
         prov_gdfs_before = {}
         for st_id in service_types.index:
@@ -391,14 +386,7 @@ class EffectsService:
         after_blocks["is_project"] = (
             after_blocks["is_project"].fillna(False).astype(bool)
         )
-        try:
-            graph = get_accessibility_graph(after_blocks, "intermodal")
-        except Exception as e:
-            raise http_exception(
-                500, "Error generating territory graph", _detail=str(e)
-            )
-
-        acc_mx = calculate_accessibility_matrix(after_blocks, graph)
+        acc_mx = get_accessibility_matrix(after_blocks)
 
         service_types["infrastructure_weight"] = (
             service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
@@ -622,14 +610,7 @@ class EffectsService:
         else:
             after_blocks["is_project"] = False
 
-        try:
-            graph = get_accessibility_graph(after_blocks, "intermodal")
-        except Exception as e:
-            raise http_exception(
-                500, "Error generating territory graph", _detail=str(e)
-            )
-
-        acc_mx = calculate_accessibility_matrix(after_blocks, graph)
+        acc_mx = get_accessibility_matrix(after_blocks)
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
@@ -757,22 +738,26 @@ class EffectsService:
         except Exception as e:
             raise http_exception(500, "Failed to attach land-use predictions: {}", e)
 
-        gdf_out = gdf_out.to_crs(crs="EPSG:4326")
+        gdf_out = gdf_out.to_crs("EPSG:4326")
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
-        geom_col = gdf_out.geometry.name
-        non_geom = [c for c in gdf_out.columns if c != geom_col]
-        non_geom_sorted = sorted(non_geom, key=lambda s: s.casefold())
-        pin_first = [c for c in ["is_project"] if c in non_geom_sorted]
-        rest = [c for c in non_geom_sorted if c not in pin_first]
-        gdf_out = gdf_out[pin_first + rest + [geom_col]]
-
-        geojson = json.loads(gdf_out.to_json())
 
         service_types = await self.urban_api_client.get_service_types()
         en2ru = await build_en_to_ru_map(service_types)
+        rename_map = {k: v for k, v in en2ru.items() if k in gdf_out.columns}
+        if rename_map:
+            gdf_out = gdf_out.rename(columns=rename_map)
 
-        geojson = await remap_properties_keys_in_geojson(geojson, en2ru)
+        geom_col = gdf_out.geometry.name
+        non_geom = [c for c in gdf_out.columns if c != geom_col]
 
+        pin_first = [c for c in ["is_project", "Предсказанный вид использования"] if c in non_geom]
+
+        rest = [c for c in non_geom if c not in pin_first]
+        rest_sorted = sorted(rest, key=lambda s: s.casefold())
+
+        gdf_out = gdf_out[pin_first + rest_sorted + [geom_col]]
+
+        geojson = json.loads(gdf_out.to_json())
 
         self.cache.save(
             "values_transformation",
@@ -919,13 +904,7 @@ class EffectsService:
         service_types = await adapt_service_types(service_types, self.urban_api_client)
         service_types = service_types[~service_types["social_values"].isna()].copy()
 
-        try:
-            graph = get_accessibility_graph(blocks, "intermodal")
-        except Exception as e:
-            raise http_exception(
-                500, "Error generating territory graph", _detail=str(e)
-            )
-        acc_mx = calculate_accessibility_matrix(blocks, graph)
+        acc_mx = get_accessibility_matrix(blocks)
 
         prov_gdfs: Dict[str, gpd.GeoDataFrame] = {}
         for st_id in service_types.index:
@@ -1088,8 +1067,7 @@ class EffectsService:
         )
         roads_gdf = roads_gdf.to_crs(before_blocks.crs).overlay(before_blocks)
 
-        graph = get_accessibility_graph(before_blocks, "drive")
-        acc_mx = calculate_accessibility_matrix(before_blocks, graph)
+        acc_mx = get_accessibility_matrix(before_blocks)
         dist_mx = calculate_distance_matrix(before_blocks)
 
         st_for_social = service_types_df[
@@ -1121,11 +1099,10 @@ class EffectsService:
 
         return long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
 
-    #FIXME починить перепутанную передачу params и token
     async def evaluate_social_economical_metrics(
             self,
-            params: SocioEconomicByProjectDTO,
             token: str,
+            params: SocioEconomicByProjectDTO
     ):
         """
         Project-level multi-scenario calculation with a shared context.
@@ -1168,17 +1145,23 @@ class EffectsService:
             )
             results[sid] = records
 
-        method_name = "evaluate_social_economical_metrics"
+        method_name = "social_economical_metrics"
 
         project_info = await self.urban_api_client.get_project(project_id, token)
         updated_at = project_info.get("updated_at")
 
+        #FIXME проверить хэш параметров
+
+        # params_for_hash = {
+        #     "project_id": project_id,
+        #     "regional_scenario_id": parent_id,
+        #     "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else None,
+        # }
+
         params_for_hash = {
             "project_id": project_id,
-            "regional_scenario_id": parent_id,
-            "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else None,
+            "regional_scenario_id": parent_id
         }
-        phash = self.cache.params_hash(params_for_hash)
 
         self.cache.save(
             method_name,

@@ -16,7 +16,7 @@ TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
     "values_transformation": effects_service.values_transformation,
     "values_oriented_requirements": effects_service.values_oriented_requirements,
-    "socio_economics": effects_service.evaluate_social_economical_metrics,
+    "social_economical_metrics": effects_service.evaluate_social_economical_metrics,
 }
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()
@@ -103,11 +103,8 @@ class AnyTask:
 
 async def create_task(method: str, token: str, params, task_id: str) -> str:
     """
-    Создание задачи для асинхронного расчёта эффектов.
-    Теперь поддерживает как сценарные (scenario_id), так и проектные (project_id) методы.
+    Task creation for async Effects calculations
     """
-
-    # --- Проверяем, относится ли метод к проектным ---
     is_project_based = method in {"socio_economics", "evaluate_social_economical_metrics"}
 
     if is_project_based:

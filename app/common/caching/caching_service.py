@@ -66,7 +66,10 @@ class FileCache:
         return path
 
     def _latest_path(self, method: str, scenario_id: int) -> Path | None:
-        pattern = f"*__scenario_{scenario_id}__{_safe(method)}__*.json"
+        if method == "social_economical_metric":
+            pattern = f"*__project_{scenario_id}__{_safe(method)}__*.json"
+        else:
+            pattern = f"*__scenario_{scenario_id}__{_safe(method)}__*.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         return files[0] if files else None
 
@@ -77,8 +80,10 @@ class FileCache:
         params_hash: str,
         max_age: timedelta | None = None,
     ) -> dict[str, Any] | None:
-
-        pattern = f"*__scenario_{scenario_id}__{_safe(method)}__{params_hash}.json"
+        if method == "social_economical_metric":
+            pattern = f"*__project_{scenario_id}__{_safe(method)}__{params_hash}.json"
+        else:
+            pattern = f"*__scenario_{scenario_id}__{_safe(method)}__{params_hash}.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         if not files:
             return None
