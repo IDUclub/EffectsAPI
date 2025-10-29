@@ -8,7 +8,7 @@ import geopandas as gpd
 from fastapi import FastAPI
 from loguru import logger
 
-from app.dependencies import effects_service, file_cache
+from app.dependencies import effects_service, file_cache, effects_utils
 
 MethodFunc = Callable[[str, Any], "dict[str, Any]"]
 
@@ -101,40 +101,90 @@ class AnyTask:
             self.error = str(exc)
 
 
-async def create_task(method: str, token: str, params, task_id: str) -> str:
+async def create_task(
+    method: str,
+    token: str,
+    params,
+) -> dict:
     """
-    Task creation for async Effects calculations
-    """
-    is_project_based = method in {"socio_economics", "evaluate_social_economical_metrics"}
+    Create (or reuse) an async Effects task.
 
-    if is_project_based:
-        norm_params = params
+    Returns:
+        dict: { "task_id": str, "status": "queued" | "running" | "done" }
+    """
+
+    project_based_methods = {"social_economical_metrics"}
+
+    if method in project_based_methods:
+        owner_id = getattr(params, "project_id", None)
         params_for_hash = {
             "project_id": getattr(params, "project_id", None),
             "regional_scenario_id": getattr(params, "regional_scenario_id", None),
         }
         phash = file_cache.params_hash(params_for_hash)
-        owner_id = getattr(params, "project_id", None)
+        task_id = f"{method}_{owner_id}_{phash}"
 
-    else:
-        norm_params = await effects_service.get_optimal_func_zone_data(params, token)
+        cached = file_cache.load(method, owner_id, phash)
+        if cached and "data" in cached:
+            return {"task_id": task_id, "status": "done"}
+
+        norm_params = params
+        task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
+        if task.task_id in _task_map:
+            return {"task_id": task.task_id, "status": "running"}
+        _task_map[task.task_id] = task
+        await _task_queue.put(task)
+        return {"task_id": task.task_id, "status": "queued"}
+
+    if method == "values_oriented_requirements":
+        base_id = await effects_utils.resolve_base_id(token, getattr(params, "scenario_id"))
+        logger.info(
+            "[Tasks] values_oriented_requirements base_id=%s (requested=%s)",
+            base_id, getattr(params, "scenario_id")
+        )
+
+        base_params = params.model_copy(update={
+            "scenario_id": base_id,
+            "proj_func_zone_source": None,
+            "proj_func_source_year": None,
+            "context_func_zone_source": None,
+            "context_func_source_year": None,
+        })
+        norm_params = await effects_service.get_optimal_func_zone_data(base_params, token)
+
         params_for_hash = await effects_service.build_hash_params(norm_params, token)
         phash = file_cache.params_hash(params_for_hash)
-        owner_id = norm_params.scenario_id
+        owner_id = base_id
+        task_id = f"{method}_{owner_id}_{phash}"
 
-    task = AnyTask(
-        method,
-        owner_id,
-        token,
-        norm_params,
-        phash,
-        file_cache,
-        task_id,
-    )
+        cached = file_cache.load(method, owner_id, phash)
+        if cached and "data" in cached and "result" in cached["data"]:
+            logger.info("[Tasks] Cache hit for values_oriented_requirements -> DONE")
+            return {"task_id": task_id, "status": "done"}
+
+        task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
+        if task.task_id in _task_map:
+            return {"task_id": task.task_id, "status": "running"}
+        _task_map[task.task_id] = task
+        await _task_queue.put(task)
+        return {"task_id": task.task_id, "status": "queued"}
+
+    norm_params = await effects_service.get_optimal_func_zone_data(params, token)
+    params_for_hash = await effects_service.build_hash_params(norm_params, token)
+    phash = file_cache.params_hash(params_for_hash)
+    owner_id = norm_params.scenario_id
+    task_id = f"{method}_{owner_id}_{phash}"
+
+    cached = file_cache.load(method, owner_id, phash)
+    if cached and "data" in cached:
+        return {"task_id": task_id, "status": "done"}
+
+    task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
+    if task.task_id in _task_map:
+        return {"task_id": task.task_id, "status": "running"}
     _task_map[task.task_id] = task
     await _task_queue.put(task)
-
-    return task.task_id
+    return {"task_id": task.task_id, "status": "queued"}
 
 
 async def _worker():

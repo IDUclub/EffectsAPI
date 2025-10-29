@@ -773,65 +773,20 @@ class EffectsService:
     def _get_value_level(self, provisions: list[float | None]) -> float:
         vals = [p for p in provisions if p is not None]
         return float(np.mean(vals)) if vals else np.nan
-#FIXME is not calculating for base id
+
     async def values_oriented_requirements(
         self,
         token: str,
         params: TerritoryTransformationDTO | DevelopmentDTO,
         persist: Literal["full", "table_only"] = "full",
     ):
-
         method_name = "values_oriented_requirements"
-
-        info_curr = await self.urban_api_client.get_scenario_info(
-            params.scenario_id, token
-        )
-        updated_at_curr = info_curr["updated_at"]
-        project_id = (info_curr.get("project") or {}).get("project_id")
-        regional_id = (info_curr.get("parent_scenario") or {}).get("id")
 
         force: bool = bool(getattr(params, "force", False))
 
-        base_id: Optional[int] = None
-        if project_id and regional_id:
-            proj_scenarios = await self.urban_api_client.get_project_scenarios(
-                project_id, token
-            )
-
-            matches = [
-                s
-                for s in proj_scenarios
-                if self.effects_utils.truthy_is_based(s)
-                   and self.effects_utils.parent_id(s) == regional_id
-                   and self.effects_utils.sid(s) is not None
-            ]
-            if not matches:
-                only_based = [
-                    s
-                    for s in proj_scenarios
-                    if self.effects_utils.truthy_is_based(s) and self.effects_utils.sid(s) is not None
-                ]
-                if only_based:
-                    only_based.sort(
-                        key=lambda x: (
-                            x.get("updated_at") is not None,
-                            x.get("updated_at"),
-                        ),
-                        reverse=True,
-                    )
-                    matches = [only_based[0]]
-            if matches:
-                matches.sort(
-                    key=lambda x: (
-                        x.get("updated_at") is not None,
-                        x.get("updated_at"),
-                    ),
-                    reverse=True,
-                )
-                base_id = self.effects_utils.sid(matches[0])
-
-        if base_id is None:
-            base_id = params.scenario_id
+        base_id = await self.effects_utils.resolve_base_id(token, params.scenario_id)
+        logger.info(
+            f"Using base scenario_id={base_id} (requested={params.scenario_id})")
 
         params_base = params.model_copy(
             update={

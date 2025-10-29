@@ -19,3 +19,12 @@ class ServiceTypesResponse(BaseModel):
         description="Service types in the transformed (after) scenario; may be empty or identical to 'before'"
     )
 
+
+class ValuesServiceTypesResponse(BaseModel):
+    """
+    List of service types available for values oriented requirements.
+    """
+    services: List[ServiceType] = Field(
+        ...,
+        description="Service types in the base scenario"
+    )

@@ -1,5 +1,5 @@
 import asyncio
-from typing import Annotated
+from typing import Annotated, Union
 
 from fastapi import APIRouter
 from fastapi.params import Depends
@@ -13,6 +13,7 @@ from app.effects_api.modules.task_service import (
     _task_queue,
 )
 from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
+from .schemas.service_types_response_schema import ServiceTypesResponse, ValuesServiceTypesResponse
 
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
@@ -232,23 +233,38 @@ async def task_status(task_id: str):
     raise http_exception(404, "task not found", task_id)
 
 
-@router.get("/get_service_types",
-            summary="List service types for a scenario",
-            description=(
-                "Returns service type identifiers available for a given `scenario_id` and `method` "
-                "from the cached layer. Intended to help clients discover which services can be requested."
-            ))
+@router.get(
+    "/get_service_types",
+    summary="List service types",
+    response_model=Union[ServiceTypesResponse, ValuesServiceTypesResponse],
+    description=(
+                 "Returns service type identifiers available for a given `scenario_id` and `method` "
+                 "from the cached layer. Intended to help clients discover which services can be requested."
+                 "For 'territory_transformation' method 'before' and 'after' keys with services are returned"
+                 "For  'values_oriented_requirements' only 'services' key with services is returned"
+                ),
+    response_model_exclude_none=True,
+)
 async def get_service_types(
     scenario_id: int,
     method: str = "territory_transformation",
     token: str = Depends(verify_token),
 ):
-    reposnse = await get_services_with_ids_from_layer(
-        scenario_id, method, file_cache, effects_utils, token=token
-    )
-    return await get_services_with_ids_from_layer(
-        scenario_id, method, file_cache, effects_utils, token=token
-    )
+    """Return service types depending on the method."""
+    if method == "territory_transformation":
+        data = await get_services_with_ids_from_layer(
+            scenario_id, method, file_cache, effects_utils, token=token
+        )
+        return ServiceTypesResponse(before=data["before"], after=data.get("after", []))
+
+    if method == "values_oriented_requirements":
+        services = await get_services_with_ids_from_layer(
+            scenario_id, method, file_cache, effects_utils, token=token
+        )
+        return ValuesServiceTypesResponse(
+            services=services.get("services", [])
+        )
+    raise http_exception(400, f"Unsupported method", f"{method}")
 
 
 @router.get("/territory_transformation/{scenario_id}/{service_name}",
