@@ -14,6 +14,7 @@ from app.effects_api.modules.task_service import (
 )
 from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
 from .schemas.service_types_response_schema import ServiceTypesResponse, ValuesServiceTypesResponse
+from .schemas.territory_transformation_response_schema import TerritoryTransformationLayerResponse
 
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
@@ -276,7 +277,9 @@ async def get_service_types(
                 "- When both versions exist: returns `{ before, after, provision_total_before, provision_total_after }`\n"
                 "- When only `before` exists: returns `{ before, provision_total_before }`\n"
                 "- When only `after` exists: returns `{ after, provision_total_after }`"
-            ))
+            ),
+            response_model=TerritoryTransformationLayerResponse,
+            )
 async def get_territory_transformation_layer(scenario_id: int, service_name: str):
     cached = file_cache.load_latest("territory_transformation", scenario_id)
     if not cached:
@@ -288,7 +291,7 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
         fc = data.get("before", {}).get(service_name)
         if not fc:
             raise http_exception(404, f"service '{service_name}' not found")
-        return JSONResponse(content=fc)
+        return TerritoryTransformationLayerResponse(before= fc)
 
     before_dict = data.get("before", {}) or {}
     after_dict = data.get("after", {}) or {}
@@ -300,23 +303,20 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
     provision_after = after_dict.get("provision_total_after")
 
     if fc_before and fc_after:
-        return JSONResponse(
-            content={
-                "before": fc_before,
-                "after": fc_after,
-                "provision_total_before": provision_before,
-                "provision_total_after": provision_after,
-            }
+        return TerritoryTransformationLayerResponse(
+            before =  fc_before,
+            after = fc_after,
+            provision_total_before = provision_before,
+            provision_total_after = provision_after,
         )
 
     if fc_before and not fc_after:
-        return JSONResponse(
-            content={"before": fc_before, "provision_total_before": provision_before}
-        )
+        return TerritoryTransformationLayerResponse(
+            before = fc_before, provision_total_before = provision_before)
 
     if fc_after and not fc_before:
-        return JSONResponse(
-            content={"after": fc_after, "provision_total_after": provision_after}
+        return TerritoryTransformationLayerResponse(
+            after= fc_after, provision_total_after = provision_after
         )
 
     raise http_exception(404, f"service '{service_name}' not found")
