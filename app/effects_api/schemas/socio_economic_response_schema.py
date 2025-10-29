@@ -9,7 +9,6 @@ from app.effects_api.dto.development_dto import (
 )
 
 from ..dto.socio_economic_project_dto import (
-    SocioEconomicByProjectComputedDTO,
     SocioEconomicByProjectDTO,
 )
 from ..dto.socio_economic_scenario_dto import SocioEconomicByScenarioDTO
@@ -74,6 +73,5 @@ class SocioEconomicResponseSchema(SocioEconomicSchema):
         DevelopmentDTO,
         ContextDevelopmentDTO,
         SocioEconomicByProjectDTO,
-        SocioEconomicByScenarioDTO,
-        SocioEconomicByProjectComputedDTO,
+        SocioEconomicByScenarioDTO
     ]

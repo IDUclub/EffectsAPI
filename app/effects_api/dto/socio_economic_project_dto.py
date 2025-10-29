@@ -1,8 +1,4 @@
-from typing import Dict, Literal
-
 from pydantic import BaseModel, Field
-
-from app.common.dto.models import SourceYear
 
 
 class SocioEconomicByProjectDTO(BaseModel):
@@ -18,8 +14,6 @@ class SocioEconomicByProjectDTO(BaseModel):
         description="Regional scenario ID using for filtering.",
     )
 
-
-class SocioEconomicByProjectComputedDTO(SocioEconomicByProjectDTO):
-    context_func_zone_source: Literal["PZZ", "OSM", "User"]
-    context_func_source_year: int
-    project_sources: Dict[int, SourceYear]
+    force: bool = Field(
+        default=False, description="flag for recalculating the scenario"
+    )

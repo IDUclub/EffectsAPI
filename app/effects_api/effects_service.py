@@ -773,7 +773,7 @@ class EffectsService:
     def _get_value_level(self, provisions: list[float | None]) -> float:
         vals = [p for p in provisions if p is not None]
         return float(np.mean(vals)) if vals else np.nan
-
+#FIXME is not calculating for base id
     async def values_oriented_requirements(
         self,
         token: str,
@@ -1106,13 +1106,34 @@ class EffectsService:
     ):
         """
         Project-level multi-scenario calculation with a shared context.
-        Return: {scenario_id: [{territory_id, indicator_id, value}, ...]}
+        Return: {territory_id: {indicator_id: {scenario_id: value}}}
         """
 
         project_id = params.project_id
         parent_id = params.regional_scenario_id
 
-        context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id, token)
+        method_name = "social_economical_metrics"
+
+        only_parent_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
+
+        params_for_hash = {
+            "project_id": project_id,
+            "regional_scenario_id": parent_id,
+            "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else [],
+        }
+
+        if not params.force:
+            phash = self.cache.params_hash(params_for_hash)
+            cached = self.cache.load(method_name, project_id, phash)
+            if cached:
+                logger.info(f"[Effects] cache hit for project {project_id}, returning cached data")
+                return cached["results"]
+        else:
+            logger.info(f"[Effects] force=True, recalculating metrics for project {project_id}")
+
+        context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(
+            project_id, token
+        )
 
         scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
         target = [
@@ -1124,7 +1145,6 @@ class EffectsService:
         )
 
         only_parent_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
-
         results: dict[int, list[dict]] = {}
 
         for s in target:
@@ -1145,23 +1165,10 @@ class EffectsService:
             )
             results[sid] = records
 
-        method_name = "social_economical_metrics"
+        results = self.effects_utils.pivot_results_by_territory(results)
 
         project_info = await self.urban_api_client.get_project(project_id, token)
         updated_at = project_info.get("updated_at")
-
-        #FIXME проверить хэш параметров
-
-        # params_for_hash = {
-        #     "project_id": project_id,
-        #     "regional_scenario_id": parent_id,
-        #     "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else None,
-        # }
-
-        params_for_hash = {
-            "project_id": project_id,
-            "regional_scenario_id": parent_id
-        }
 
         self.cache.save(
             method_name,

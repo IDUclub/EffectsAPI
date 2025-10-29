@@ -24,6 +24,8 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 _locks: dict[str, asyncio.Lock] = {}
 
 
+#TODO continue response schemas
+
 def _get_lock(key: str) -> asyncio.Lock:
     lock = _locks.get(key)
     if lock is None:
@@ -59,18 +61,38 @@ def _cache_complete(method: str, cached: dict | None) -> bool:
     return True
 
 
-@router.get("/methods")
+@router.get("/methods", summary="List available task methods",
+            description=(
+                "Returns the current list of task method names that can be scheduled via this API.\n\n"
+                "- `territory_transformation` — F 35 scenario-based, create with `POST /tasks/{method}`\n"
+                "- `values_transformation` — F 26 scenario-based, create with `POST /tasks/{method}`\n"
+                "- `values_oriented_requirements` — F 36 scenario-based, create with `POST /tasks/{method}`\n"
+                "- `social_economical_metrics` — F22 project-based, create with `POST /tasks/project/{method}`"
+            ))
 async def get_methods():
-    """router for getting method names available for tasks creation"""
     return list(TASK_METHODS.keys())
 
 
-@router.post("/{method}", status_code=202)
+@router.post("/{method}", status_code=202,
+             summary="Create scenario-based task",
+             description=(
+                 "Queues an asynchronous **scenario-based** task.\n\n"
+                 "**Caching behavior**: if `force=false` and a complete cached result exists "
+                 "for the computed parameter hash, the endpoint returns `status=done` immediately. "
+                 "Otherwise a task is queued and `status=queued` is returned.\n\n"
+                 "**Response statuses**:\n"
+                 "- `queued`: task was enqueued successfully\n"
+                 "- `running`: a task with the same id is already being processed\n"
+                 "- `done`: cached result is available\n"
+                 "- `failed`: check `GET /tasks/status/{task_id}` for error details\n\n"
+                 "**Task id format**: `{method}_{scenario_id}_{phash}`"
+             ))
 async def create_scenario_task(
     method: str,
     params: Annotated[ContextDevelopmentDTO, Depends()],
     token: str = Depends(verify_token),
 ):
+    """Roter for task creation"""
     if method not in TASK_METHODS:
         raise http_exception(404, f"method '{method}' is not registered", method)
 
@@ -110,7 +132,22 @@ async def create_scenario_task(
 
         return {"task_id": task_id, "status": "queued"}
 
-@router.post("/project/{method}", status_code=202)
+@router.post("/project/{method}", status_code=202,
+             summary="Create project-based task",
+             description=(
+                 "Queues an asynchronous **project-level** task. Currently supported: "
+                 "`social_economical_metrics`.\n\n"
+                 "**Hash parameters**: `{project_id, regional_scenario_id, territory_ids}`.\n"
+                 "**Caching behavior**: if `force=false` and a complete cached result exists, "
+                 "for the computed parameter hash, the endpoint returns `status=done` immediately. "
+                 "Otherwise a task is queued and `status=queued` is returned.\n\n"
+                 "**Response statuses**:\n"
+                 "- `queued`: task was enqueued successfully\n"
+                 "- `running`: a task with the same id is already being processed\n"
+                 "- `done`: cached result is available\n"
+                 "- `failed`: check `GET /tasks/status/{task_id}` for error details\n\n"
+                 "**Task id format**: `{method}_{project_id}_{phash}`"
+             ))
 async def create_project_task(
     method: str,
     params: Annotated[SocioEconomicByProjectDTO, Depends()],
@@ -157,7 +194,19 @@ async def create_project_task(
     return {"task_id": task_id, "status": "queued"}
 
 
-@router.get("/status/{task_id}")
+@router.get("/status/{task_id}",
+            summary="Get task status",
+            description=(
+                "Returns current status for a task id.\n\n"
+                "**Statuses**:\n"
+                "- `queued`: waiting in queue\n"
+                "- `running`: being processed\n"
+                "- `done`: cached (final) result exists\n"
+                "- `failed`: task failed, `error` field may be present\n"
+                "- `unknown`: task is tracked but status cannot be resolved\n\n"
+                "If the cache already contains a complete result for the `task_id`, "
+                "the endpoint responds with `status=done`."
+            ))
 async def task_status(task_id: str):
     method, scenario_id, phash = file_cache.parse_task_id(task_id)
     if method and scenario_id is not None and phash:
@@ -183,18 +232,35 @@ async def task_status(task_id: str):
     raise http_exception(404, "task not found", task_id)
 
 
-@router.get("/get_service_types")
+@router.get("/get_service_types",
+            summary="List service types for a scenario",
+            description=(
+                "Returns service type identifiers available for a given `scenario_id` and `method` "
+                "from the cached layer. Intended to help clients discover which services can be requested."
+            ))
 async def get_service_types(
     scenario_id: int,
     method: str = "territory_transformation",
     token: str = Depends(verify_token),
 ):
+    reposnse = await get_services_with_ids_from_layer(
+        scenario_id, method, file_cache, effects_utils, token=token
+    )
     return await get_services_with_ids_from_layer(
         scenario_id, method, file_cache, effects_utils, token=token
     )
 
 
-@router.get("/territory_transformation/{scenario_id}/{service_name}")
+@router.get("/territory_transformation/{scenario_id}/{service_name}",
+            summary="Get territory transformation layer by service",
+            description=(
+                "Fetches a GeoJSON layer for a specific `service_name` from the cached "
+                "`territory_transformation` result.\n\n"
+                "**Responses**:\n"
+                "- When both versions exist: returns `{ before, after, provision_total_before, provision_total_after }`\n"
+                "- When only `before` exists: returns `{ before, provision_total_before }`\n"
+                "- When only `after` exists: returns `{ after, provision_total_after }`"
+            ))
 async def get_territory_transformation_layer(scenario_id: int, service_name: str):
     cached = file_cache.load_latest("territory_transformation", scenario_id)
     if not cached:
@@ -240,7 +306,13 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
     raise http_exception(404, f"service '{service_name}' not found")
 
 
-@router.get("/values_oriented_requirements/{scenario_id}/{service_name}")
+@router.get("/values_oriented_requirements/{scenario_id}/{service_name}",
+            summary="Get Values-Oriented Requirements layer",
+            description=(
+                "Returns the GeoJSON layer and values table for a `service_name`, computed for the "
+                "**base scenario** of the provided `scenario_id`.\n\n"
+                "Rejects the request if the cached base result is stale compared to the base scenario metadata."
+            ))
 async def get_values_oriented_requirements_layer(
     scenario_id: int,
     service_name: str,
@@ -280,7 +352,12 @@ async def get_values_oriented_requirements_layer(
     )
 
 
-@router.get("/values_oriented_requirements_table/{scenario_id}")
+@router.get("/values_oriented_requirements_table/{scenario_id}",
+            summary="Get Values-Oriented Requirements tables",
+            description=(
+                "Returns the values table and service-type deficit table for the **base scenario** "
+                "of the provided `scenario_id`."
+            ))
 async def get_values_oriented_requirements_table(
     scenario_id: int,
     token: str = Depends(verify_token),
@@ -312,17 +389,30 @@ async def get_values_oriented_requirements_table(
     )
 
 
-@router.get("/get_from_cache/{method_name}/{scenario_id}")
-async def get_layer(scenario_id: int, method_name: str):
-    cached = file_cache.load_latest(method_name, scenario_id)
+@router.get("/get_from_cache/{method_name}/{project_scenario_id}",
+            summary="Get raw cached data by method and owner id",
+            description=(
+                "Reads the latest cached JSON payload for a given `method_name` and owner id. "
+                "For scenario-based methods the owner is a **scenario id**; for project-based "
+                "methods the owner is a **project id**."
+            ))
+async def get_layer(project_scenario_id: int, method_name: str):
+    cached = file_cache.load_latest(method_name, project_scenario_id)
     if not cached:
-        raise http_exception(404, "no saved result for this scenario", scenario_id)
+        raise http_exception(404, "no saved result for this scenario", project_scenario_id)
 
     data: dict = cached["data"]
     return JSONResponse(content=data)
 
 
-@router.get("/get_provisions/{scenario_id}")
+@router.get("/get_provisions/{scenario_id}",
+            summary="Get total provision values",
+            description=(
+                "Returns total provision values from the cached `territory_transformation` result for "
+                "the specified `scenario_id`. Depending on availability, the response contains:\n"
+                "- `provision_total_before` and `provision_total_after`, or\n"
+                "- only one of them if the other is not present."
+            ))
 async def get_total_provisions(scenario_id: int):
     cached = file_cache.load_latest("territory_transformation", scenario_id)
     if not cached:

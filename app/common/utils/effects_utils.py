@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from blocksnet.optimization.services import AreaSolution, Facade
 import geopandas as gpd
+from loguru import logger
 
 from app.clients.urban_api_client import UrbanAPIClient
 
@@ -109,3 +110,55 @@ class EffectsUtils:
             facade.add_service_type(st_name, st_weight, df)
 
         return facade
+
+    def pivot_results_by_territory(
+            self,
+            results: dict[int, list[dict]]
+    ) -> dict[int, dict[int, dict[int, float]]]:
+        """
+        Transform scenario-first results to territory-first pivot.
+
+        Input:
+            results: {
+                scenario_id: [
+                    {"territory_id": int, "indicator_id": int, "value": number},
+                    ...
+                ],
+                ...
+            }
+
+        Output:
+            {
+              territory_id: [
+                {"indicator_id": int, <scenario_id>: number, <scenario_id>: number, ...},
+                ...
+              ],
+              ...
+            }
+        """
+        pivot: dict[int, dict[int, dict[int, float]]] = {}
+
+        for scenario_id, records in results.items():
+            if not records:
+                continue
+            for rec in records:
+                try:
+                    t_id = int(rec["territory_id"])
+                    ind_id = int(rec["indicator_id"])
+                    val = rec.get("value")
+                except (KeyError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        f"[Effects] Skip bad record in scenario {scenario_id}: {rec} ({exc})"
+                    )
+                    continue
+
+                if t_id not in pivot:
+                    pivot[t_id] = {}
+                if ind_id not in pivot[t_id]:
+                    pivot[t_id][ind_id] = {}
+                pivot[t_id][ind_id][int(scenario_id)] = val
+
+        logger.info(
+            f"[Effects] Pivoted to nested format: {len(pivot)} territories."
+        )
+        return pivot
