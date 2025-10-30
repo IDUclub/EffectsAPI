@@ -1050,6 +1050,7 @@ class EffectsService:
         long_df["territory_id"] = pd.to_numeric(long_df["territory_id"], errors="coerce").apply(self.effects_utils.clean_number)
         long_df["indicator_id"] = long_df["indicator_id"].apply(self.effects_utils.clean_number)
         long_df["value"] = long_df["value"].apply(self.effects_utils.clean_number)
+        long_df["value"] = long_df["value"].round(2)
         long_df = long_df[long_df["indicator_id"].notna() & long_df["territory_id"].notna()].fillna(0)
 
         return long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
