@@ -14,7 +14,12 @@ from app.effects_api.modules.task_service import (
 )
 from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
 from .schemas.service_types_response_schema import ServiceTypesResponse, ValuesServiceTypesResponse
-from .schemas.territory_transformation_response_schema import TerritoryTransformationLayerResponse
+from .schemas.socio_economic_metrics_response_schema import SocioEconomicMetricsResponseSchema
+from .schemas.territory_transformation_response_schema import TerritoryTransformationLayerResponse, \
+    TerritoryTransformationResponseTablesSchema
+from .schemas.values_oriented_response_schema import ValuesOrientedResponseSchema
+from .schemas.values_tables_response_schema import ValuesOrientedResponseTablesSchema
+from .schemas.values_transformation_response_schema import ValuesTransformationSchema
 
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
@@ -328,7 +333,8 @@ async def get_territory_transformation_layer(scenario_id: int, service_name: str
                 "Returns the GeoJSON layer and values table for a `service_name`, computed for the "
                 "**base scenario** of the provided `scenario_id`.\n\n"
                 "Rejects the request if the cached base result is stale compared to the base scenario metadata."
-            ))
+            ),
+            response_model=ValuesOrientedResponseSchema)
 async def get_values_oriented_requirements_layer(
     scenario_id: int,
     service_name: str,
@@ -358,13 +364,11 @@ async def get_values_oriented_requirements_layer(
             404, f"service '{service_name}' not found in base scenario {base_id}"
         )
 
-    return JSONResponse(
-        content={
-            "base_scenario_id": base_id,
-            "geojson": prov,
-            "values_table": values_dict,
-            "services_type_deficit": values_table,
-        }
+    return ValuesOrientedResponseSchema(
+            base_scenario_id= base_id,
+            geojson= prov,
+            values_table= values_dict,
+            services_type_deficit= values_table,
     )
 
 
@@ -373,7 +377,9 @@ async def get_values_oriented_requirements_layer(
             description=(
                 "Returns the values table and service-type deficit table for the **base scenario** "
                 "of the provided `scenario_id`."
-            ))
+            ),
+            response_model=ValuesOrientedResponseTablesSchema
+            )
 async def get_values_oriented_requirements_table(
     scenario_id: int,
     token: str = Depends(verify_token),
@@ -396,12 +402,10 @@ async def get_values_oriented_requirements_table(
     values_dict = data.get("result")
     values_table = data.get("social_values_table")
 
-    return JSONResponse(
-        content={
-            "base_scenario_id": base_id,
-            "values_table": values_dict,
-            "services_type_deficit": values_table,
-        }
+    return ValuesOrientedResponseTablesSchema(
+            base_scenario_id = base_id,
+            values_table = values_dict,
+            services_type_deficit = values_table,
     )
 
 
@@ -411,14 +415,24 @@ async def get_values_oriented_requirements_table(
                 "Reads the latest cached JSON payload for a given `method_name` and owner id. "
                 "For scenario-based methods the owner is a **scenario id**; for project-based "
                 "methods the owner is a **project id**."
-            ))
+            ),
+            response_model=Union[ValuesTransformationSchema, SocioEconomicMetricsResponseSchema])
 async def get_layer(project_scenario_id: int, method_name: str):
     cached = file_cache.load_latest(method_name, project_scenario_id)
     if not cached:
         raise http_exception(404, "no saved result for this scenario", project_scenario_id)
 
-    data: dict = cached["data"]
-    return JSONResponse(content=data)
+    data = cached["data"]
+
+    if method_name == "values_transformation":
+        return ValuesTransformationSchema(geojson=data)
+
+    if method_name == "social_economical_metrics":
+        data = cached["data"]["results"]
+        return SocioEconomicMetricsResponseSchema(results=data)
+
+    else:
+        raise http_exception(400, "Method not implemented", method_name, "Allowed methods: values_transformation, social_economical_metrics")
 
 
 @router.get("/get_provisions/{scenario_id}",
@@ -428,7 +442,8 @@ async def get_layer(project_scenario_id: int, method_name: str):
                 "the specified `scenario_id`. Depending on availability, the response contains:\n"
                 "- `provision_total_before` and `provision_total_after`, or\n"
                 "- only one of them if the other is not present."
-            ))
+            ),
+            response_model=TerritoryTransformationResponseTablesSchema)
 async def get_total_provisions(scenario_id: int):
     cached = file_cache.load_latest("territory_transformation", scenario_id)
     if not cached:
@@ -443,17 +458,15 @@ async def get_total_provisions(scenario_id: int):
     provision_after = after_dict.get("provision_total_after")
 
     if provision_before and provision_after:
-        return JSONResponse(
-            content={
-                "provision_total_before": provision_before,
-                "provision_total_after": provision_after,
-            }
+        return TerritoryTransformationResponseTablesSchema(
+                provision_total_before = provision_before,
+                provision_total_after= provision_after,
         )
 
     if provision_before and not provision_after:
-        return JSONResponse(content={"provision_total_before": provision_before})
+        return TerritoryTransformationResponseTablesSchema(provision_total_before = provision_before)
 
     if provision_after and not provision_before:
-        return JSONResponse(content={"provision_total_after": provision_after})
+        return TerritoryTransformationResponseTablesSchema(provision_total_after= provision_after)
 
     raise http_exception(404, f"Result for scenario ID{scenario_id} not found")

@@ -19,8 +19,8 @@ from blocksnet.optimization.services import (
     WeightedObjective, GradientChooser,
 )
 from blocksnet.relations import (
-    calculate_accessibility_matrix,
-    get_accessibility_graph, calculate_distance_matrix, generate_adjacency_graph,
+ calculate_distance_matrix,
+ generate_adjacency_graph,
 )
 from loguru import logger
 

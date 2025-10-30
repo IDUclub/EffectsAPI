@@ -1,6 +1,8 @@
-from typing import Literal
+from typing import Literal, List, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic_geojson import PolygonModel, MultiPolygonModel, FeatureModel
+from pydantic_geojson._base import FeatureCollectionFieldType
 
 
 class SourceYear(BaseModel):
@@ -11,3 +13,13 @@ class SourceYear(BaseModel):
 class ServiceType(BaseModel):
     id: int
     name: str
+
+class FeatureCollectionModel(BaseModel):
+    type: str = FeatureCollectionFieldType
+    features: List[
+        Union[
+            PolygonModel,
+            MultiPolygonModel,
+            FeatureModel
+        ],
+    ]
