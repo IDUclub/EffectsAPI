@@ -1,15 +1,17 @@
 import asyncio
-from typing import Annotated, Union
+from typing import Annotated, Union, Literal
 
 from fastapi import APIRouter
 from fastapi.params import Depends
+from loguru import logger
+from starlette.responses import JSONResponse
 
 from app.common.auth.auth import verify_token
 from app.effects_api.modules.task_service import (
     TASK_METHODS,
     AnyTask,
     _task_map,
-    _task_queue,
+    _task_queue, create_task,
 )
 from .dto.socio_economic_project_dto import SocioEconomicByProjectDTO
 from .schemas.service_types_response_schema import ServiceTypesResponse, ValuesServiceTypesResponse
@@ -155,49 +157,30 @@ async def create_scenario_task(
                  "**Task id format**: `{method}_{project_id}_{phash}`"
              ))
 async def create_project_task(
-    method: str,
+    method: Literal["social_economical_metrics"],
     params: Annotated[SocioEconomicByProjectDTO, Depends()],
-    token: Annotated[str, Depends(verify_token)]
+    token: Annotated[str, Depends(verify_token)],
 ):
     """
     separate endpoint for project-based tasks (e.g., socio_economics).
     """
-    if method not in {"social_economical_metrics"}:
+    if method != "social_economical_metrics":
         raise http_exception(400, f"method '{method}' is not project-based", method)
 
-    project_id = params.project_id
-    regional_id = params.regional_scenario_id
+    try:
+        result = await create_task(method, token, params)
+    except Exception as e:
+        logger.exception("Failed to enqueue project task")
+        raise http_exception(
+            500,
+            "Failed to enqueue project task",
+            _input={"method": method, "project_id": params.project_id},
+            _detail=str(e),
+        )
 
-    params_for_hash = {
-        "project_id": project_id,
-        "regional_scenario_id": regional_id,
-        "territory_ids": getattr(params, "territory_ids", []),
-    }
-    phash = file_cache.params_hash(params_for_hash)
-    task_id = f"{method}_{project_id}_{phash}"
-
-    force = getattr(params, "force", False)
-    cached = None if force else file_cache.load(method, project_id, phash)
-    if not force and _cache_complete(method, cached):
-        return {"task_id": task_id, "status": "done"}
-
-    existing = None if force else _task_map.get(task_id)
-    if not force and existing and existing.status in {"queued", "running"}:
-        return {"task_id": task_id, "status": existing.status}
-
-    task = AnyTask(
-        method,
-        project_id,
-        token,
-        params,
-        phash,
-        file_cache,
-        task_id,
-    )
-    _task_map[task_id] = task
-    await _task_queue.put(task)
-
-    return {"task_id": task_id, "status": "queued"}
+    status = result.get("status")
+    http_code = 200 if status == "done" else 202
+    return JSONResponse(result, status_code=http_code)
 
 
 @router.get("/status/{task_id}",

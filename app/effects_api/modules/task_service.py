@@ -8,6 +8,7 @@ import geopandas as gpd
 from fastapi import FastAPI
 from loguru import logger
 
+from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import effects_service, file_cache, effects_utils
 
 MethodFunc = Callable[[str, Any], "dict[str, Any]"]
@@ -18,6 +19,15 @@ TASK_METHODS: dict[str, MethodFunc] = {
     "values_oriented_requirements": effects_service.values_oriented_requirements,
     "social_economical_metrics": effects_service.evaluate_social_economical_metrics,
 }
+
+
+def _cache_complete(method: str, cached_obj: dict | None) -> bool:
+    if not cached_obj:
+        return False
+    data = cached_obj.get("data") or {}
+    if method == "territory_transformation":
+        return bool(data.get("after"))
+    return True
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()
 _task_map: dict[str, "AnyTask"] = {}
@@ -62,15 +72,7 @@ class AnyTask:
 
             cached = None if force else self.cache.load(self.method, self.scenario_id, self.param_hash)
 
-            def cache_complete(method: str, cached_obj: dict | None) -> bool:
-                if not cached_obj:
-                    return False
-                data = cached_obj.get("data") or {}
-                if method == "territory_transformation":
-                    return bool(data.get("after"))
-                return True
-
-            if not force and cache_complete(self.method, cached):
+            if not force and _cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
                 self.result = cached["data"]
                 self.status = "done"
@@ -117,24 +119,42 @@ async def create_task(
 
     if method in project_based_methods:
         owner_id = getattr(params, "project_id", None)
+
         params_for_hash = {
             "project_id": getattr(params, "project_id", None),
             "regional_scenario_id": getattr(params, "regional_scenario_id", None),
+            "territory_ids": getattr(params, "territory_ids", []) or [],
         }
-        phash = file_cache.params_hash(params_for_hash)
+
+        force = bool(getattr(params, "force", False))
+
+        try:
+            phash = file_cache.params_hash(params_for_hash)
+        except Exception as e:
+            logger.exception("Failed to hash params (project)")
+            raise http_exception(500, "Failed to hash task parameters",
+                                 _input=params_for_hash, _detail=str(e))
+
         task_id = f"{method}_{owner_id}_{phash}"
 
-        cached = file_cache.load(method, owner_id, phash)
-        if cached and "data" in cached:
+        try:
+            cached = None if force else file_cache.load(method, owner_id, phash)
+        except Exception as e:
+            logger.exception("Cache load failed (project)")
+            raise http_exception(500, "Cache load failed",
+                                 _input={"method": method, "owner_id": owner_id}, _detail=str(e))
+
+        if not force and _cache_complete(method, cached):
             return {"task_id": task_id, "status": "done"}
 
-        norm_params = params
-        task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
-        if task.task_id in _task_map:
-            return {"task_id": task.task_id, "status": "running"}
-        _task_map[task.task_id] = task
+        existing = None if force else _task_map.get(task_id)
+        if not force and existing and existing.status in {"queued", "running"}:
+            return {"task_id": task_id, "status": existing.status}
+
+        task = AnyTask(method, owner_id, token, params, phash, file_cache, task_id)
+        _task_map[task_id] = task
         await _task_queue.put(task)
-        return {"task_id": task.task_id, "status": "queued"}
+        return {"task_id": task_id, "status": "queued"}
 
     if method == "values_oriented_requirements":
         base_id = await effects_utils._resolve_base_id(token, getattr(params, "scenario_id"))
