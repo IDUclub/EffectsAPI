@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -16,7 +16,7 @@ from blocksnet.machine_learning.regression import SocialRegressor, DensityRegres
 from blocksnet.optimization.services import (
     TPEOptimizer,
     WeightedConstraints,
-    WeightedObjective, GradientChooser,
+    WeightedObjective, GradientChooser, Facade, AreaSolution,
 )
 from blocksnet.relations import (
  calculate_distance_matrix,
@@ -28,7 +28,7 @@ from app.effects_api.modules.scenario_service import ScenarioService
 from app.effects_api.modules.service_type_service import (
     adapt_service_types,
     build_en_to_ru_map,
-    remap_properties_keys_in_geojson, generate_blocksnet_columns, ensure_missing_id_and_name_columns,
+    generate_blocksnet_columns, ensure_missing_id_and_name_columns,
 )
 from .modules.context_service import ContextService
 from ..clients.urban_api_client import UrbanAPIClient
@@ -170,7 +170,12 @@ class EffectsService:
             if prov_gdf.demand.sum() == 0:
                 prov_totals[st_name] = None
             else:
-                total = float(provision_strong_total(prov_gdf))
+                try:
+                    total = float(provision_strong_total(prov_gdf))
+                except Exception as e:
+                    logger.exception("Provision total calculation failed")
+                    raise http_exception(500, "Provision total calculation failed",
+                                         _input={"service_type": st_name}, _detail=str(e))
                 prov_totals[st_name] = round(total, ndigits)
         return prov_totals
 
@@ -238,7 +243,11 @@ class EffectsService:
             before_blocks["is_project"] = (
                 before_blocks["is_project"].fillna(False).astype(bool)
             )
-        acc_mx = get_accessibility_matrix(before_blocks)
+        try:
+            acc_mx = get_accessibility_matrix(before_blocks)
+        except Exception as e:
+            logger.exception(f"Error getting accessibility matrix: {str(e)}")
+            raise http_exception(500, "Error getting accessibility matrix", _detail=e)
 
         prov_gdfs_before = {}
         for st_id in service_types.index:
@@ -256,10 +265,14 @@ class EffectsService:
         prov_totals = await self.calculate_provision_totals(prov_gdfs_before)
 
         existing_data = cached["data"] if cached else {}
-        existing_data["before"] = {
-            name: await gdf_to_ru_fc_rounded(gdf, ndigits=6)
-            for name, gdf in prov_gdfs_before.items()
-        }
+        try:
+            existing_data["before"] = {
+                name: await gdf_to_ru_fc_rounded(gdf, ndigits=6)
+                for name, gdf in prov_gdfs_before.items()
+            }
+        except Exception as e:
+            logger.exception(f"Error calculating BEFORE: {str(e)}")
+            raise http_exception(500, "Error calculating BEFORE", _detail=e)
         existing_data["before"]["provision_total_before"] = prov_totals
 
         self.cache.save(
@@ -302,10 +315,20 @@ class EffectsService:
         for lu in LandUse:
             blocks_gdf[lu.value] = blocks_gdf[lu.value].apply(lambda v: min(v, 1))
 
-        adjacency_graph = generate_adjacency_graph(blocks_gdf, 10)
+        try:
+            adjacency_graph = generate_adjacency_graph(blocks_gdf, 10)
+        except Exception as e:
+            logger.exception("Adjacency graph generation failed")
+            raise http_exception(500, "Adjacency graph generation failed", _detail=str(e))
+
         dr = DensityRegressor()
 
-        density_df = dr.evaluate(blocks_gdf, adjacency_graph)
+        try:
+            density_df = dr.evaluate(blocks_gdf, adjacency_graph)
+        except Exception as e:
+            logger.exception("Density evaluation failed")
+            raise http_exception(500, "Density evaluation failed", _detail=str(e))
+
         density_df.loc[density_df["fsi"] < 0, "fsi"] = 0
 
         density_df.loc[density_df["gsi"] < 0, "gsi"] = 0
@@ -317,10 +340,49 @@ class EffectsService:
         density_df.loc[blocks_gdf["residential"] == 0, "mxi"] = 0
         density_df["site_area"] = blocks_gdf["site_area"]
 
-        development_df = calculate_development_indicators(density_df)
+        try:
+            development_df = calculate_development_indicators(density_df)
+        except Exception as e:
+            logger.exception("Development indicator calculation failed")
+            raise http_exception(500, "Development indicator calculation failed", _detail=str(e))
+
         development_df["population"] = development_df["living_area"] // 20
 
         return development_df
+
+    def _build_facade(
+        self,
+        after_blocks: gpd.GeoDataFrame,
+        acc_mx: pd.DataFrame,
+        service_types: pd.DataFrame,
+    ) -> Facade:
+        blocks_lus = after_blocks.loc[after_blocks["is_project"], "land_use"]
+        blocks_lus = blocks_lus[~blocks_lus.isna()].to_dict()
+
+        var_adapter = AreaSolution(blocks_lus)
+
+        facade = Facade(
+            blocks_lu=blocks_lus,
+            blocks_df=after_blocks,
+            accessibility_matrix=acc_mx,
+            var_adapter=var_adapter,
+        )
+
+        for st_id, row in service_types.iterrows():
+            st_name = row["name"]
+            st_weight = row["infrastructure_weight"]
+            st_column = f"capacity_{st_name}"
+
+            if st_column in after_blocks.columns:
+                df = after_blocks.rename(columns={st_column: "capacity"})[
+                    ["capacity"]
+                ].fillna(0)
+            else:
+                df = after_blocks[[]].copy()
+                df["capacity"] = 0
+            facade.add_service_type(st_name, st_weight, df)
+
+        return facade
 
     async def territory_transformation_scenario_after(
         self,
@@ -337,8 +399,9 @@ class EffectsService:
         is_based = info["is_based"]
 
         if is_based:
+            logger.exception("Base scenario has no 'after' layer needed for calculation")
             raise http_exception(
-                400, "base scenario has no 'after' layer needed for calculation"
+                400, "Base scenario has no 'after' layer needed for calculation"
             )
 
         params = await self.get_optimal_func_zone_data(params, token)
@@ -386,7 +449,11 @@ class EffectsService:
         after_blocks["is_project"] = (
             after_blocks["is_project"].fillna(False).astype(bool)
         )
-        acc_mx = get_accessibility_matrix(after_blocks)
+        try:
+            acc_mx = get_accessibility_matrix(after_blocks)
+        except Exception as e:
+            logger.exception("Accessibility matrix calculation failed")
+            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
 
         service_types["infrastructure_weight"] = (
             service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
@@ -405,7 +472,7 @@ class EffectsService:
             after_blocks["population"] = pd.to_numeric(
                 after_blocks["population"], errors="coerce"
             ).fillna(0)
-        facade = self.effects_utils.build_facade(after_blocks, acc_mx, service_types)
+        facade = self._build_facade(after_blocks, acc_mx, service_types)
 
         services_weights = service_types.set_index("name")[
             "infrastructure_weight"
@@ -424,9 +491,11 @@ class EffectsService:
             vars_chooser=GradientChooser(facade, facade.num_params, num_top=5),
         )
 
-        best_x, best_val, perc, func_evals = tpe_optimizer.run(
-            max_runs=MAX_RUNS, timeout=10, initial_runs_num=1
-        )
+        try:
+            best_x, best_val, perc, func_evals = tpe_optimizer.run(max_runs=MAX_RUNS, timeout=10, initial_runs_num=1)
+        except Exception as e:
+            logger.exception("Optimization (TPE) failed")
+            raise http_exception(500, "Service placement optimization failed", _detail=str(e))
 
         prov_gdfs_after = {}
         for st_id in service_types.index:
@@ -610,7 +679,11 @@ class EffectsService:
         else:
             after_blocks["is_project"] = False
 
-        acc_mx = get_accessibility_matrix(after_blocks)
+        try:
+            acc_mx = get_accessibility_matrix(after_blocks)
+        except Exception as e:
+            logger.exception("Accessibility matrix calculation failed")
+            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
@@ -622,13 +695,18 @@ class EffectsService:
             * service_types["infrastructure_weight"]
         )
 
-        facade = self.effects_utils.build_facade(after_blocks, acc_mx, service_types)
+        facade = self._build_facade(after_blocks, acc_mx, service_types)
         test_blocks: gpd.GeoDataFrame = after_blocks.loc[
             list(facade._blocks_lu.keys())
         ].copy()
         test_blocks.index = test_blocks.index.astype(int)
 
-        solution_df = facade.solution_to_services_df(best_x).copy()
+        try:
+            solution_df = facade.solution_to_services_df(best_x).copy()
+        except Exception as e:
+            logger.exception("Solution calculation failed")
+            raise http_exception(500, "Solution calculation failed", _detail=str(e))
+
         solution_df["block_id"] = solution_df["block_id"].astype(int)
         metrics = [
             c
@@ -742,22 +820,26 @@ class EffectsService:
         gdf_out.geometry = round_coords(gdf_out.geometry, 6)
 
         service_types = await self.urban_api_client.get_service_types()
-        en2ru = await build_en_to_ru_map(service_types)
-        rename_map = {k: v for k, v in en2ru.items() if k in gdf_out.columns}
-        if rename_map:
-            gdf_out = gdf_out.rename(columns=rename_map)
+        try:
+            en2ru = await build_en_to_ru_map(service_types)
+            rename_map = {k: v for k, v in en2ru.items() if k in gdf_out.columns}
+            if rename_map:
+                gdf_out = gdf_out.rename(columns=rename_map)
 
-        geom_col = gdf_out.geometry.name
-        non_geom = [c for c in gdf_out.columns if c != geom_col]
+            geom_col = gdf_out.geometry.name
+            non_geom = [c for c in gdf_out.columns if c != geom_col]
 
-        pin_first = [c for c in ["is_project", "Предсказанный вид использования"] if c in non_geom]
+            pin_first = [c for c in ["is_project", "Предсказанный вид использования"] if c in non_geom]
 
-        rest = [c for c in non_geom if c not in pin_first]
-        rest_sorted = sorted(rest, key=lambda s: s.casefold())
+            rest = [c for c in non_geom if c not in pin_first]
+            rest_sorted = sorted(rest, key=lambda s: s.casefold())
 
-        gdf_out = gdf_out[pin_first + rest_sorted + [geom_col]]
+            gdf_out = gdf_out[pin_first + rest_sorted + [geom_col]]
 
-        geojson = json.loads(gdf_out.to_json())
+            geojson = json.loads(gdf_out.to_json())
+        except Exception as e:
+            logger.exception("Failed to attach land-use predictions to gdf_out")
+            raise http_exception(500, "Failed to attach land-use predictions", e)
 
         self.cache.save(
             "values_transformation",
@@ -859,7 +941,11 @@ class EffectsService:
         service_types = await adapt_service_types(service_types, self.urban_api_client)
         service_types = service_types[~service_types["social_values"].isna()].copy()
 
-        acc_mx = get_accessibility_matrix(blocks)
+        try:
+            acc_mx = get_accessibility_matrix(blocks)
+        except Exception as e:
+            logger.exception("Accessibility matrix calculation failed")
+            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
 
         prov_gdfs: Dict[str, gpd.GeoDataFrame] = {}
         for st_id in service_types.index:
@@ -961,16 +1047,19 @@ class EffectsService:
 
         return result_df
 
-    async def _get_project_scenarios_by_parent(
-            self, project_id: int, regional_scenario_id: int, token: str
-    ) -> list[int]:
-        """Return scenario_ids for a given project that have the given regional_scenario_id as parent."""
-        all_sc = await self.urban_api_client.get_project_scenarios(project_id, token)
-        return [
-            int(s["scenario_id"])
-            for s in all_sc
-            if (s.get("parent_scenario") or {}).get("id") == int(regional_scenario_id)
-        ]
+    def _clean_number(self, v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return None
+        try:
+            if isinstance(v, (np.floating, float, np.integer, int)) and not np.isfinite(float(v)):
+                return None
+        except Exception:
+            pass
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return float(v)
+        return v
 
     async def _compute_for_single_scenario(
             self,
@@ -1001,7 +1090,11 @@ class EffectsService:
             )
 
         context_territories_gdf = context_territories_gdf.to_crs(before_blocks.crs)
-        assigned = assign_objects(before_blocks, context_territories_gdf.rename(columns={"parent": "name"}))
+        try:
+            assigned = assign_objects(before_blocks, context_territories_gdf.rename(columns={"parent": "name"}))
+        except Exception as e:
+            logger.exception("Error assigning objects")
+            raise http_exception(500, "Error assigning objects", _detail=str(e))
         before_blocks["parent"] = assigned["name"].astype(int)
 
         if only_parent_ids:
@@ -1022,7 +1115,11 @@ class EffectsService:
         )
         roads_gdf = roads_gdf.to_crs(before_blocks.crs).overlay(before_blocks)
 
-        acc_mx = get_accessibility_matrix(before_blocks)
+        try:
+            acc_mx = get_accessibility_matrix(before_blocks)
+        except Exception as e:
+            logger.exception("Accessibility matrix calculation failed")
+            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
         dist_mx = calculate_distance_matrix(before_blocks)
 
         st_for_social = service_types_df[
@@ -1047,13 +1144,65 @@ class EffectsService:
         long_df["indicator_id"] = long_df["indicator"].map(INDICATORS_MAPPING)
 
 
-        long_df["territory_id"] = pd.to_numeric(long_df["territory_id"], errors="coerce").apply(self.effects_utils.clean_number)
-        long_df["indicator_id"] = long_df["indicator_id"].apply(self.effects_utils.clean_number)
-        long_df["value"] = long_df["value"].apply(self.effects_utils.clean_number)
+        long_df["territory_id"] = pd.to_numeric(long_df["territory_id"], errors="coerce").apply(self._clean_number)
+        long_df["indicator_id"] = long_df["indicator_id"].apply(self._clean_number)
+        long_df["value"] = long_df["value"].apply(self._clean_number)
         long_df["value"] = long_df["value"].round(2)
         long_df = long_df[long_df["indicator_id"].notna() & long_df["territory_id"].notna()].fillna(0)
 
         return long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
+
+    def _pivot_results_by_territory(
+            self,
+            results: dict[int, list[dict]]
+    ) -> dict[int, dict[int, dict[int, float]]]:
+        """
+        Transform scenario-first results to territory-first pivot.
+
+        Input:
+            results: {
+                scenario_id: [
+                    {"territory_id": int, "indicator_id": int, "value": number},
+                    ...
+                ],
+                ...
+            }
+
+        Output:
+            {
+              territory_id: [
+                {"indicator_id": int, <scenario_id>: number, <scenario_id>: number, ...},
+                ...
+              ],
+              ...
+            }
+        """
+        pivot: dict[int, dict[int, dict[int, float]]] = {}
+
+        for scenario_id, records in results.items():
+            if not records:
+                continue
+            for rec in records:
+                try:
+                    t_id = int(rec["territory_id"])
+                    ind_id = int(rec["indicator_id"])
+                    val = rec.get("value")
+                except (KeyError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        f"[Effects] Skip bad record in scenario {scenario_id}: {rec} ({exc})"
+                    )
+                    continue
+
+                if t_id not in pivot:
+                    pivot[t_id] = {}
+                if ind_id not in pivot[t_id]:
+                    pivot[t_id][ind_id] = {}
+                pivot[t_id][ind_id][int(scenario_id)] = val
+
+        logger.info(
+            f"[Effects] Pivoted to nested format: {len(pivot)} territories."
+        )
+        return pivot
 
     async def evaluate_social_economical_metrics(
             self,
@@ -1121,7 +1270,7 @@ class EffectsService:
             )
             results[sid] = records
 
-        results = self.effects_utils.pivot_results_by_territory(results)
+        results = self._pivot_results_by_territory(results)
 
         project_info = await self.urban_api_client.get_project(project_id, token)
         updated_at = project_info.get("updated_at")

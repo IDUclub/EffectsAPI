@@ -137,7 +137,7 @@ async def create_task(
         return {"task_id": task.task_id, "status": "queued"}
 
     if method == "values_oriented_requirements":
-        base_id = await effects_utils.resolve_base_id(token, getattr(params, "scenario_id"))
+        base_id = await effects_utils._resolve_base_id(token, getattr(params, "scenario_id"))
         logger.info(
             "[Tasks] values_oriented_requirements base_id=%s (requested=%s)",
             base_id, getattr(params, "scenario_id")

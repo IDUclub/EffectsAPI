@@ -5,8 +5,6 @@ from pydantic import BaseModel, Field
 from app.common.dto.models import FeatureCollectionModel
 
 
-# from pydantic_geojson import FeatureCollectionModel
-
 class TerritoryTransformationResponseTablesSchema(BaseModel):
     provision_total_before: Dict[str, float] = Field(
         None, description="Provision values for the base scenario, by service name"

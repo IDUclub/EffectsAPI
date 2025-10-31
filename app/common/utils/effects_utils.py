@@ -25,7 +25,7 @@ class EffectsUtils:
         p = s.get("parent_scenario")
         return p.get("id") if isinstance(p, dict) else p
 
-    def sid(self, s: Dict[str, Any]) -> Optional[int]:
+    def get_service_id(self, s: Dict[str, Any]) -> Optional[int]:
         try:
             return int(s.get("scenario_id"))
         except Exception:
@@ -45,13 +45,13 @@ class EffectsUtils:
             for s in scenarios
             if self.truthy_is_based(s.get("is_based"))
                and self.parent_id(s) == regional_id
-               and self.sid(s) is not None
+               and self.get_service_id(s) is not None
         ]
         if not matches:
             only_based = [
                 s
                 for s in scenarios
-                if self.truthy_is_based(s.get("is_based")) and self.sid(s) is not None
+                if self.truthy_is_based(s.get("is_based")) and self.get_service_id(s) is not None
             ]
             if not only_based:
                 return scenario_id
@@ -61,104 +61,4 @@ class EffectsUtils:
             key=lambda x: (x.get("updated_at") is not None, x.get("updated_at")),
             reverse=True,
         )
-        return self.sid(matches[0]) or scenario_id
-
-    def clean_number(self, v):
-        if v is None or (isinstance(v, float) and np.isnan(v)):
-            return None
-        try:
-            if isinstance(v, (np.floating, float, np.integer, int)) and not np.isfinite(float(v)):
-                return None
-        except Exception:
-            pass
-        if isinstance(v, (np.integer,)):
-            return int(v)
-        if isinstance(v, (np.floating,)):
-            return float(v)
-        return v
-
-    def build_facade(
-        self,
-        after_blocks: gpd.GeoDataFrame,
-        acc_mx: pd.DataFrame,
-        service_types: pd.DataFrame,
-    ) -> Facade:
-        blocks_lus = after_blocks.loc[after_blocks["is_project"], "land_use"]
-        blocks_lus = blocks_lus[~blocks_lus.isna()].to_dict()
-
-        var_adapter = AreaSolution(blocks_lus)
-
-        facade = Facade(
-            blocks_lu=blocks_lus,
-            blocks_df=after_blocks,
-            accessibility_matrix=acc_mx,
-            var_adapter=var_adapter,
-        )
-
-        for st_id, row in service_types.iterrows():
-            st_name = row["name"]
-            st_weight = row["infrastructure_weight"]
-            st_column = f"capacity_{st_name}"
-
-            if st_column in after_blocks.columns:
-                df = after_blocks.rename(columns={st_column: "capacity"})[
-                    ["capacity"]
-                ].fillna(0)
-            else:
-                df = after_blocks[[]].copy()
-                df["capacity"] = 0
-            facade.add_service_type(st_name, st_weight, df)
-
-        return facade
-
-    def pivot_results_by_territory(
-            self,
-            results: dict[int, list[dict]]
-    ) -> dict[int, dict[int, dict[int, float]]]:
-        """
-        Transform scenario-first results to territory-first pivot.
-
-        Input:
-            results: {
-                scenario_id: [
-                    {"territory_id": int, "indicator_id": int, "value": number},
-                    ...
-                ],
-                ...
-            }
-
-        Output:
-            {
-              territory_id: [
-                {"indicator_id": int, <scenario_id>: number, <scenario_id>: number, ...},
-                ...
-              ],
-              ...
-            }
-        """
-        pivot: dict[int, dict[int, dict[int, float]]] = {}
-
-        for scenario_id, records in results.items():
-            if not records:
-                continue
-            for rec in records:
-                try:
-                    t_id = int(rec["territory_id"])
-                    ind_id = int(rec["indicator_id"])
-                    val = rec.get("value")
-                except (KeyError, TypeError, ValueError) as exc:
-                    logger.warning(
-                        f"[Effects] Skip bad record in scenario {scenario_id}: {rec} ({exc})"
-                    )
-                    continue
-
-                if t_id not in pivot:
-                    pivot[t_id] = {}
-                if ind_id not in pivot[t_id]:
-                    pivot[t_id][ind_id] = {}
-                pivot[t_id][ind_id][int(scenario_id)] = val
-
-        logger.info(
-            f"[Effects] Pivoted to nested format: {len(pivot)} territories."
-        )
-        return pivot
+        return self.get_service_id(matches[0]) or scenario_id
