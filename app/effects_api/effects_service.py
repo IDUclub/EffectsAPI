@@ -5,22 +5,30 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from blocksnet.analysis.indicators import calculate_development_indicators
-from blocksnet.analysis.indicators.socio_economic import calculate_general_indicators, calculate_demographic_indicators, \
-    calculate_transport_indicators, calculate_engineering_indicators, calculate_social_indicators
+from blocksnet.analysis.indicators.socio_economic import (
+    calculate_demographic_indicators,
+    calculate_engineering_indicators,
+    calculate_general_indicators,
+    calculate_social_indicators,
+    calculate_transport_indicators,
+)
 from blocksnet.analysis.land_use.prediction import SpatialClassifier
 from blocksnet.analysis.provision import competitive_provision, provision_strong_total
 from blocksnet.blocks.assignment import assign_objects
 from blocksnet.config import service_types_config
 from blocksnet.enums import LandUse
-from blocksnet.machine_learning.regression import SocialRegressor, DensityRegressor
+from blocksnet.machine_learning.regression import DensityRegressor, SocialRegressor
 from blocksnet.optimization.services import (
+    AreaSolution,
+    Facade,
+    GradientChooser,
     TPEOptimizer,
     WeightedConstraints,
-    WeightedObjective, GradientChooser, Facade, AreaSolution,
+    WeightedObjective,
 )
 from blocksnet.relations import (
- calculate_distance_matrix,
- generate_adjacency_graph,
+    calculate_distance_matrix,
+    generate_adjacency_graph,
 )
 from loguru import logger
 
@@ -28,20 +36,31 @@ from app.effects_api.modules.scenario_service import ScenarioService
 from app.effects_api.modules.service_type_service import (
     adapt_service_types,
     build_en_to_ru_map,
-    generate_blocksnet_columns, ensure_missing_id_and_name_columns,
+    ensure_missing_id_and_name_columns,
+    generate_blocksnet_columns,
 )
-from .modules.context_service import ContextService
+
 from ..clients.urban_api_client import UrbanAPIClient
 from ..common.caching.caching_service import FileCache
 from ..common.exceptions.http_exception_wrapper import http_exception
-from ..common.utils.geodata import fc_to_gdf, gdf_to_ru_fc_rounded, is_fc, round_coords, _ensure_block_index, \
-    get_accessibility_matrix
+from ..common.utils.effects_utils import EffectsUtils
+from ..common.utils.geodata import (
+    _ensure_block_index,
+    fc_to_gdf,
+    gdf_to_ru_fc_rounded,
+    get_accessibility_matrix,
+    is_fc,
+    round_coords,
+)
 from .constants.const import (
+    INDICATORS_MAPPING,
     INFRASTRUCTURES_WEIGHTS,
     MAX_EVALS,
     MAX_RUNS,
     PRED_VALUE_RU,
-    PROB_COLS_EN_TO_RU, ROADS_ID, INDICATORS_MAPPING, )
+    PROB_COLS_EN_TO_RU,
+    ROADS_ID,
+)
 from .dto.development_dto import (
     ContextDevelopmentDTO,
     DevelopmentDTO,
@@ -50,7 +69,7 @@ from .dto.socio_economic_project_dto import (
     SocioEconomicByProjectDTO,
 )
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
-from ..common.utils.effects_utils import EffectsUtils
+from .modules.context_service import ContextService
 
 
 class EffectsService:
@@ -60,7 +79,7 @@ class EffectsService:
         cache: FileCache,
         scenario_service: ScenarioService,
         context_service: ContextService,
-        effects_utils: EffectsUtils
+        effects_utils: EffectsUtils,
     ):
         self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
@@ -174,8 +193,12 @@ class EffectsService:
                     total = float(provision_strong_total(prov_gdf))
                 except Exception as e:
                     logger.exception("Provision total calculation failed")
-                    raise http_exception(500, "Provision total calculation failed",
-                                         _input={"service_type": st_name}, _detail=str(e))
+                    raise http_exception(
+                        500,
+                        "Provision total calculation failed",
+                        _input={"service_type": st_name},
+                        _detail=str(e),
+                    )
                 prov_totals[st_name] = round(total, ndigits)
         return prov_totals
 
@@ -285,11 +308,9 @@ class EffectsService:
 
         return prov_gdfs_before
 
-
-
     @staticmethod
     async def run_development_parameters(
-            blocks_gdf: gpd.GeoDataFrame,
+        blocks_gdf: gpd.GeoDataFrame,
     ) -> pd.DataFrame:
         """
         Compute core *development* indicators (FSI, GSI, MXI, etc.) for each
@@ -319,7 +340,9 @@ class EffectsService:
             adjacency_graph = generate_adjacency_graph(blocks_gdf, 10)
         except Exception as e:
             logger.exception("Adjacency graph generation failed")
-            raise http_exception(500, "Adjacency graph generation failed", _detail=str(e))
+            raise http_exception(
+                500, "Adjacency graph generation failed", _detail=str(e)
+            )
 
         dr = DensityRegressor()
 
@@ -344,7 +367,9 @@ class EffectsService:
             development_df = calculate_development_indicators(density_df)
         except Exception as e:
             logger.exception("Development indicator calculation failed")
-            raise http_exception(500, "Development indicator calculation failed", _detail=str(e))
+            raise http_exception(
+                500, "Development indicator calculation failed", _detail=str(e)
+            )
 
         development_df["population"] = development_df["living_area"] // 20
 
@@ -399,7 +424,9 @@ class EffectsService:
         is_based = info["is_based"]
 
         if is_based:
-            logger.exception("Base scenario has no 'after' layer needed for calculation")
+            logger.exception(
+                "Base scenario has no 'after' layer needed for calculation"
+            )
             raise http_exception(
                 400, "Base scenario has no 'after' layer needed for calculation"
             )
@@ -453,7 +480,9 @@ class EffectsService:
             acc_mx = get_accessibility_matrix(after_blocks)
         except Exception as e:
             logger.exception("Accessibility matrix calculation failed")
-            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
+            raise http_exception(
+                500, "Accessibility matrix calculation failed", _detail=str(e)
+            )
 
         service_types["infrastructure_weight"] = (
             service_types["infrastructure_type"].map(INFRASTRUCTURES_WEIGHTS)
@@ -492,10 +521,14 @@ class EffectsService:
         )
 
         try:
-            best_x, best_val, perc, func_evals = tpe_optimizer.run(max_runs=MAX_RUNS, timeout=10, initial_runs_num=1)
+            best_x, best_val, perc, func_evals = tpe_optimizer.run(
+                max_runs=MAX_RUNS, timeout=10, initial_runs_num=1
+            )
         except Exception as e:
             logger.exception("Optimization (TPE) failed")
-            raise http_exception(500, "Service placement optimization failed", _detail=str(e))
+            raise http_exception(
+                500, "Service placement optimization failed", _detail=str(e)
+            )
 
         prov_gdfs_after = {}
         for st_id in service_types.index:
@@ -683,7 +716,9 @@ class EffectsService:
             acc_mx = get_accessibility_matrix(after_blocks)
         except Exception as e:
             logger.exception("Accessibility matrix calculation failed")
-            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
+            raise http_exception(
+                500, "Accessibility matrix calculation failed", _detail=str(e)
+            )
 
         service_types = await self.urban_api_client.get_service_types()
         service_types = await adapt_service_types(service_types, self.urban_api_client)
@@ -771,7 +806,9 @@ class EffectsService:
         try:
             logger.info("Running land-use prediction on 'after_blocks'")
 
-            ab = after_blocks[after_blocks.geometry.notna() & ~after_blocks.geometry.is_empty].copy()
+            ab = after_blocks[
+                after_blocks.geometry.notna() & ~after_blocks.geometry.is_empty
+            ].copy()
             ab.geometry = ab.geometry.buffer(0)
 
             try:
@@ -795,7 +832,9 @@ class EffectsService:
             gdf_out = _ensure_block_index(gdf_out)
             gdf_out = gdf_out.join(lu, how="left")
 
-            logger.info("Attached land-use predictions to gdf_out (cols: {})", keep_cols)
+            logger.info(
+                "Attached land-use predictions to gdf_out (cols: {})", keep_cols
+            )
 
             if "pred_name" in gdf_out.columns:
                 gdf_out["Предсказанный вид использования"] = (
@@ -806,11 +845,17 @@ class EffectsService:
                 )
                 gdf_out = gdf_out.drop(columns=["pred_name"])
 
-            prob_cols = [c for c in ["prob_urban", "prob_non_urban", "prob_industrial"] if c in gdf_out.columns]
+            prob_cols = [
+                c
+                for c in ["prob_urban", "prob_non_urban", "prob_industrial"]
+                if c in gdf_out.columns
+            ]
             for col in prob_cols:
                 gdf_out[col] = gdf_out[col].astype(float).round(1)
 
-            rename_map = {k: v for k, v in PROB_COLS_EN_TO_RU.items() if k in gdf_out.columns}
+            rename_map = {
+                k: v for k, v in PROB_COLS_EN_TO_RU.items() if k in gdf_out.columns
+            }
             gdf_out = gdf_out.rename(columns=rename_map)
 
         except Exception as e:
@@ -829,7 +874,11 @@ class EffectsService:
             geom_col = gdf_out.geometry.name
             non_geom = [c for c in gdf_out.columns if c != geom_col]
 
-            pin_first = [c for c in ["is_project", "Предсказанный вид использования"] if c in non_geom]
+            pin_first = [
+                c
+                for c in ["is_project", "Предсказанный вид использования"]
+                if c in non_geom
+            ]
 
             rest = [c for c in non_geom if c not in pin_first]
             rest_sorted = sorted(rest, key=lambda s: s.casefold())
@@ -868,7 +917,8 @@ class EffectsService:
 
         base_id = await self.effects_utils.resolve_base_id(token, params.scenario_id)
         logger.info(
-            f"Using base scenario_id={base_id} (requested={params.scenario_id})")
+            f"Using base scenario_id={base_id} (requested={params.scenario_id})"
+        )
 
         params_base = params.model_copy(
             update={
@@ -945,7 +995,9 @@ class EffectsService:
             acc_mx = get_accessibility_matrix(blocks)
         except Exception as e:
             logger.exception("Accessibility matrix calculation failed")
-            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
+            raise http_exception(
+                500, "Accessibility matrix calculation failed", _detail=str(e)
+            )
 
         prov_gdfs: Dict[str, gpd.GeoDataFrame] = {}
         for st_id in service_types.index:
@@ -1048,29 +1100,43 @@ class EffectsService:
         return result_df
 
     def _clean_number(self, v):
+        """
+        Normalize numeric-like values to built-in Python types.
+
+        Converts numpy numeric types (e.g. np.int64, np.float32) to plain `int` or `float`,
+        safely handling `None`, `NaN`, and infinite values.
+
+        Returns:
+            int | float | Any | None:
+                - int or float for finite numeric inputs
+                - None for NaN, None, or ±inf
+                - unchanged value for non-numeric inputs
+        """
         if v is None or (isinstance(v, float) and np.isnan(v)):
             return None
         try:
-            if isinstance(v, (np.floating, float, np.integer, int)) and not np.isfinite(float(v)):
+            if isinstance(v, (np.floating, float, np.integer, int)) and not np.isfinite(
+                float(v)
+            ):
                 return None
         except Exception:
             pass
-        if isinstance(v, (np.integer,)):
+        if isinstance(v, np.integer):
             return int(v)
-        if isinstance(v, (np.floating,)):
+        if isinstance(v, np.floating):
             return float(v)
         return v
 
     async def _compute_for_single_scenario(
-            self,
-            scenario_id: int,
-            context_blocks: gpd.GeoDataFrame,
-            context_territories_gdf: gpd.GeoDataFrame,
-            service_types_df: pd.DataFrame,
-            proj_src: str,
-            proj_year: int,
-            token: str,
-            only_parent_ids: set[int] | None = None,
+        self,
+        scenario_id: int,
+        context_blocks: gpd.GeoDataFrame,
+        context_territories_gdf: gpd.GeoDataFrame,
+        service_types_df: pd.DataFrame,
+        proj_src: str,
+        proj_year: int,
+        token: str,
+        only_parent_ids: set[int] | None = None,
     ) -> list[dict]:
         """
         Compute indicators for ONE scenario with shared context.
@@ -1083,22 +1149,32 @@ class EffectsService:
         )
         before_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=True)
 
-        svc_cols = [c for c in before_blocks.columns if c.startswith(("count_", "capacity_"))]
+        svc_cols = [
+            c for c in before_blocks.columns if c.startswith(("count_", "capacity_"))
+        ]
         if svc_cols:
             before_blocks[svc_cols] = (
-                before_blocks[svc_cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype("int64")
+                before_blocks[svc_cols]
+                .apply(pd.to_numeric, errors="coerce")
+                .fillna(0)
+                .astype("int64")
             )
 
         context_territories_gdf = context_territories_gdf.to_crs(before_blocks.crs)
         try:
-            assigned = assign_objects(before_blocks, context_territories_gdf.rename(columns={"parent": "name"}))
+            assigned = assign_objects(
+                before_blocks,
+                context_territories_gdf.rename(columns={"parent": "name"}),
+            )
         except Exception as e:
             logger.exception("Error assigning objects")
             raise http_exception(500, "Error assigning objects", _detail=str(e))
         before_blocks["parent"] = assigned["name"].astype(int)
 
         if only_parent_ids:
-            before_blocks = before_blocks[before_blocks["parent"].isin(only_parent_ids)].copy()
+            before_blocks = before_blocks[
+                before_blocks["parent"].isin(only_parent_ids)
+            ].copy()
 
         before_blocks = generate_blocksnet_columns(before_blocks, service_types_df)
         before_blocks = ensure_missing_id_and_name_columns(before_blocks)
@@ -1119,19 +1195,23 @@ class EffectsService:
             acc_mx = get_accessibility_matrix(before_blocks)
         except Exception as e:
             logger.exception("Accessibility matrix calculation failed")
-            raise http_exception(500, "Accessibility matrix calculation failed", _detail=str(e))
+            raise http_exception(
+                500, "Accessibility matrix calculation failed", _detail=str(e)
+            )
         dist_mx = calculate_distance_matrix(before_blocks)
 
         st_for_social = service_types_df[
             service_types_df["infrastructure_type"].notna()
             & service_types_df["blocksnet"].notna()
-            ].copy()
+        ].copy()
 
         general = calculate_general_indicators(before_blocks)
         demo = calculate_demographic_indicators(before_blocks)
         transp = calculate_transport_indicators(before_blocks, acc_mx, roads_gdf)
         eng = calculate_engineering_indicators(before_blocks)
-        sc, sp = calculate_social_indicators(before_blocks, acc_mx, dist_mx, st_for_social)
+        sc, sp = calculate_social_indicators(
+            before_blocks, acc_mx, dist_mx, st_for_social
+        )
 
         indicators_df = pd.concat([general, demo, transp, eng, sc, sp])
 
@@ -1143,18 +1223,22 @@ class EffectsService:
         long_df = long_df[long_df["territory_id"] != "total"].copy()
         long_df["indicator_id"] = long_df["indicator"].map(INDICATORS_MAPPING)
 
-
-        long_df["territory_id"] = pd.to_numeric(long_df["territory_id"], errors="coerce").apply(self._clean_number)
+        long_df["territory_id"] = pd.to_numeric(
+            long_df["territory_id"], errors="coerce"
+        ).apply(self._clean_number)
         long_df["indicator_id"] = long_df["indicator_id"].apply(self._clean_number)
         long_df["value"] = long_df["value"].apply(self._clean_number)
         long_df["value"] = long_df["value"].round(2)
-        long_df = long_df[long_df["indicator_id"].notna() & long_df["territory_id"].notna()].fillna(0)
+        long_df = long_df[
+            long_df["indicator_id"].notna() & long_df["territory_id"].notna()
+        ].fillna(0)
 
-        return long_df[["territory_id", "indicator_id", "value"]].to_dict(orient="records")
+        return long_df[["territory_id", "indicator_id", "value"]].to_dict(
+            orient="records"
+        )
 
     def _pivot_results_by_territory(
-            self,
-            results: dict[int, list[dict]]
+        self, results: dict[int, list[dict]]
     ) -> dict[int, dict[int, dict[int, float]]]:
         """
         Transform scenario-first results to territory-first pivot.
@@ -1199,15 +1283,11 @@ class EffectsService:
                     pivot[t_id][ind_id] = {}
                 pivot[t_id][ind_id][int(scenario_id)] = val
 
-        logger.info(
-            f"[Effects] Pivoted to nested format: {len(pivot)} territories."
-        )
+        logger.info(f"[Effects] Pivoted to nested format: {len(pivot)} territories.")
         return pivot
 
     async def evaluate_social_economical_metrics(
-            self,
-            token: str,
-            params: SocioEconomicByProjectDTO
+        self, token: str, params: SocioEconomicByProjectDTO
     ):
         """
         Project-level multi-scenario calculation with a shared context.
@@ -1231,18 +1311,23 @@ class EffectsService:
             phash = self.cache.params_hash(params_for_hash)
             cached = self.cache.load(method_name, project_id, phash)
             if cached:
-                logger.info(f"[Effects] cache hit for project {project_id}, returning cached data")
+                logger.info(
+                    f"[Effects] cache hit for project {project_id}, returning cached data"
+                )
                 return cached["results"]
         else:
-            logger.info(f"[Effects] force=True, recalculating metrics for project {project_id}")
+            logger.info(
+                f"[Effects] force=True, recalculating metrics for project {project_id}"
+            )
 
-        context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(
-            project_id, token
+        context_blocks, context_territories_gdf, service_types = (
+            await self.context.get_shared_context(project_id, token)
         )
 
         scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
         target = [
-            s for s in scenarios
+            s
+            for s in scenarios
             if (s.get("parent_scenario") or {}).get("id") == parent_id
         ]
         logger.info(
@@ -1254,8 +1339,10 @@ class EffectsService:
 
         for s in target:
             sid = int(s["scenario_id"])
-            proj_src, proj_year = await self.urban_api_client.get_optimal_func_zone_request_data(
-                token=token, data_id=sid, source=None, year=None, project=True
+            proj_src, proj_year = (
+                await self.urban_api_client.get_optimal_func_zone_request_data(
+                    token=token, data_id=sid, source=None, year=None, project=True
+                )
             )
 
             records = await self._compute_for_single_scenario(
@@ -1283,6 +1370,7 @@ class EffectsService:
             scenario_updated_at=updated_at,
         )
 
-        logger.success(f"[Effects] socio-economic metrics cached for project_id={project_id}")
+        logger.success(
+            f"[Effects] socio-economic metrics cached for project_id={project_id}"
+        )
         return results
-

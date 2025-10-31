@@ -31,4 +31,6 @@ file_cache = FileCache()
 scenario_service = ScenarioService(urban_api_client)
 effects_utils = EffectsUtils(urban_api_client)
 context_service = ContextService(urban_api_client, file_cache)
-effects_service = EffectsService(urban_api_client, file_cache, scenario_service, context_service, effects_utils)
+effects_service = EffectsService(
+    urban_api_client, file_cache, scenario_service, context_service, effects_utils
+)

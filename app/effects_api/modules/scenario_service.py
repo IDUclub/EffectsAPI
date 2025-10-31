@@ -12,7 +12,12 @@ from loguru import logger
 
 from app.clients.urban_api_client import UrbanAPIClient
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID, LAND_USE_RULES
+from app.effects_api.constants.const import (
+    LAND_USE_RULES,
+    LIVING_BUILDINGS_ID,
+    ROADS_ID,
+    WATER_ID,
+)
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import adapt_functional_zones
 from app.effects_api.modules.service_type_service import adapt_service_types
@@ -175,17 +180,23 @@ class ScenarioService:
             features = res.get("features") or []
 
             if not features:
-                logger.info(f"Scenario {scenario_id}: no services (features=[]) -> returning empty dict")
+                logger.info(
+                    f"Scenario {scenario_id}: no services (features=[]) -> returning empty dict"
+                )
                 return {}
 
-            gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326").set_index("service_id", drop=False)
+            gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326").set_index(
+                "service_id", drop=False
+            )
             gdf = gdf.to_crs(gdf.estimate_utm_crs())
 
             gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
             return {st: impute_services(g, st) for st, g in gdfs.items()}
 
         except Exception as e:
-            logger.exception(f"Failed to fetch/process services for scenario {scenario_id}: {str(e)}")
+            logger.exception(
+                f"Failed to fetch/process services for scenario {scenario_id}: {str(e)}"
+            )
             raise http_exception(
                 404,
                 f"No services found for scenario {scenario_id}",

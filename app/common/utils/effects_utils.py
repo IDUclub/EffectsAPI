@@ -1,11 +1,4 @@
-import re
 from typing import Any, Dict, Optional
-
-import numpy as np
-import pandas as pd
-from blocksnet.optimization.services import AreaSolution, Facade
-import geopandas as gpd
-from loguru import logger
 
 from app.clients.urban_api_client import UrbanAPIClient
 
@@ -44,14 +37,15 @@ class EffectsUtils:
             s
             for s in scenarios
             if self.truthy_is_based(s.get("is_based"))
-               and self.parent_id(s) == regional_id
-               and self.get_service_id(s) is not None
+            and self.parent_id(s) == regional_id
+            and self.get_service_id(s) is not None
         ]
         if not matches:
             only_based = [
                 s
                 for s in scenarios
-                if self.truthy_is_based(s.get("is_based")) and self.get_service_id(s) is not None
+                if self.truthy_is_based(s.get("is_based"))
+                and self.get_service_id(s) is not None
             ]
             if not only_based:
                 return scenario_id

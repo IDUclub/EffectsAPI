@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+
 import geopandas as gpd
 import pandas as pd
 
@@ -121,36 +122,40 @@ class FileCache:
         else:
             phash = self.params_hash(tail)
 
-        scenario_id = int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        scenario_id = (
+            int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        )
         return method, scenario_id, phash
 
     def _artifact_path(
-            self,
-            method: str,
-            owner_id: int,
-            phash: str,
-            name: str,
-            ext: Literal["parquet", "pkl"],
+        self,
+        method: str,
+        owner_id: int,
+        phash: str,
+        name: str,
+        ext: Literal["parquet", "pkl"],
     ) -> Path:
         """Build path for a heavy artifact near JSON cache directory."""
         fname = f"artifact__{_safe(method)}__{owner_id}__{phash}__{_safe(name)}.{ext}"
         return _CACHE_DIR / fname
 
     def save_df_artifact(
-            self,
-            df: pd.DataFrame,
-            method: str,
-            owner_id: int,
-            params: dict[str, Any],
-            name: str,
-            fmt: Literal["parquet", "pkl"] = "parquet",
+        self,
+        df: pd.DataFrame,
+        method: str,
+        owner_id: int,
+        params: dict[str, Any],
+        name: str,
+        fmt: Literal["parquet", "pkl"] = "parquet",
     ) -> Path:
         """
         Save a pandas DataFrame as a heavy artifact.
         fmt='parquet' (default) is compact and fast; fmt='pkl' as a fallback.
         """
         phash = self.params_hash(params)
-        path = self._artifact_path(method, owner_id, phash, name, "parquet" if fmt == "parquet" else "pkl")
+        path = self._artifact_path(
+            method, owner_id, phash, name, "parquet" if fmt == "parquet" else "pkl"
+        )
 
         if fmt == "parquet":
             df.to_parquet(path, index=True)
@@ -167,14 +172,15 @@ class FileCache:
         elif ext == ".pkl":
             return pd.read_pickle(path)
         raise ValueError(f"Unsupported artifact extension: {ext}")
+
     def save_gdf_artifact(
-            self,
-            gdf: gpd.GeoDataFrame,
-            method: str,
-            owner_id: int,
-            params: dict[str, Any],
-            name: str,
-            fmt: Literal["parquet", "pkl"] = "parquet",
+        self,
+        gdf: gpd.GeoDataFrame,
+        method: str,
+        owner_id: int,
+        params: dict[str, Any],
+        name: str,
+        fmt: Literal["parquet", "pkl"] = "parquet",
     ) -> Path:
         phash = self.params_hash(params)
         ext = "parquet" if fmt == "parquet" else "pkl"

@@ -1,11 +1,11 @@
 import asyncio
 import re
-from typing import Dict, List, Optional, Mapping, Iterable, cast
+from typing import Dict, Iterable, List, Mapping, Optional, cast
 
+import geopandas as gpd
 import pandas as pd
 from blocksnet.analysis.indicators.socio_economic import SocialIndicator
 from blocksnet.config import service_types_config
-import geopandas as gpd
 from loguru import logger
 
 from app.clients.urban_api_client import UrbanAPIClient
@@ -69,7 +69,7 @@ async def adapt_service_types(
 
     await _warmup_social_values(list(df.index), client)
     df["social_values"] = [_SOCIAL_VALUES_BY_ST.get(st_id) for st_id in df.index]
-    df['blocksnet'] = df.apply(lambda s: SERVICE_TYPES_MAPPING.get(s.name), axis=1)
+    df["blocksnet"] = df.apply(lambda s: SERVICE_TYPES_MAPPING.get(s.name), axis=1)
 
     # return df[["name", "infrastructure_type", "infrastructure_weight", "social_values"]]
     return df
@@ -179,29 +179,36 @@ def adapt_social_service_types_df(
     df = service_types_df.copy()
 
     id_to_indicator = {
-        st_id: indicator
-        for indicator, ids in mapping.items()
-        for st_id in ids
+        st_id: indicator for indicator, ids in mapping.items() for st_id in ids
     }
 
     df["indicator"] = df.index.map(id_to_indicator)
 
-    df = df.rename(columns={
-        'radius_availability_meters': 'meters',
-        'time_availability_minutes': 'minutes',
-        'services_per_1000_normative': 'count',
-        'services_capacity_per_1000_normative': 'capacity',
-    })
+    df = df.rename(
+        columns={
+            "radius_availability_meters": "meters",
+            "time_availability_minutes": "minutes",
+            "services_per_1000_normative": "count",
+            "services_capacity_per_1000_normative": "capacity",
+        }
+    )
 
     return df
 
-def _build_name_maps(service_types_df: pd.DataFrame) -> tuple[dict[str, int], dict[str, int]]:
+
+def _build_name_maps(
+    service_types_df: pd.DataFrame,
+) -> tuple[dict[str, int], dict[str, int]]:
     """Build lookups from service type names to ids."""
     if service_types_df.index.name is None:
         service_types_df = service_types_df.copy()
         service_types_df.index.name = "service_type_id"
 
-    id_series = pd.to_numeric(service_types_df.index.to_series(), errors="coerce").dropna().astype("int64")
+    id_series = (
+        pd.to_numeric(service_types_df.index.to_series(), errors="coerce")
+        .dropna()
+        .astype("int64")
+    )
 
     name_to_id: dict[str, int] = {}
     blocksnet_to_id: dict[str, int] = {}
@@ -216,14 +223,21 @@ def _build_name_maps(service_types_df: pd.DataFrame) -> tuple[dict[str, int], di
         if isinstance(nm, str) and nm:
             prev = name_to_id.get(nm)
             if prev is not None and prev != sid_int:
-                logger.warning(f"Duplicate mapping for name {nm}: {prev} -> {sid_int} (last wins)", nm, prev, sid_int)
+                logger.warning(
+                    f"Duplicate mapping for name {nm}: {prev} -> {sid_int} (last wins)",
+                    nm,
+                    prev,
+                    sid_int,
+                )
             name_to_id[nm] = sid_int
 
         bn = row.get("blocksnet")
         if isinstance(bn, str) and bn:
             prev = blocksnet_to_id.get(bn)
             if prev is not None and prev != sid_int:
-                logger.warning(f"Duplicate mapping for blocksnet {bn}: {prev} -> {sid_int} (last wins)")
+                logger.warning(
+                    f"Duplicate mapping for blocksnet {bn}: {prev} -> {sid_int} (last wins)"
+                )
             blocksnet_to_id[bn] = sid_int
 
     return name_to_id, blocksnet_to_id
@@ -246,9 +260,10 @@ def _rename_non_id_columns_to_ids(
             pref = f"{prefix}_"
             if not col.startswith(pref):
                 continue
-            suffix = col[len(pref):]
+            suffix = col[len(pref) :]
 
-            if _NUM_SUFFIX_RE.match(suffix):
+            suffix = col[len(pref) :]
+            if suffix.isnumeric():
                 break
 
             sid = blocksnet_to_id.get(suffix) or name_to_id.get(suffix)
@@ -261,6 +276,7 @@ def _rename_non_id_columns_to_ids(
     if rename_map:
         df = df.rename(columns=rename_map)
     return df
+
 
 def ensure_missing_id_and_name_columns(
     blocks_gdf: gpd.GeoDataFrame,
@@ -290,7 +306,11 @@ def ensure_missing_id_and_name_columns(
         Updated dataframe containing all required columns.
     """
     ids = sorted(int(sid) for sid in SERVICE_TYPES_MAPPING.keys())
-    names = [name for name in SERVICE_TYPES_MAPPING.values() if isinstance(name, str) and name.strip()]
+    names = [
+        name
+        for name in SERVICE_TYPES_MAPPING.values()
+        if isinstance(name, str) and name.strip()
+    ]
 
     required_cols = []
     for sid in ids:
@@ -313,6 +333,7 @@ def ensure_missing_id_and_name_columns(
         blocks_gdf = blocks_gdf.join(pd.DataFrame(add, index=blocks_gdf.index))
 
     return blocks_gdf
+
 
 def generate_blocksnet_columns(
     blocks_gdf: gpd.GeoDataFrame,
@@ -382,5 +403,7 @@ def generate_blocksnet_columns(
             )
             new_columns[f"{prefix}_{bnet}"] = series
 
-    out = pd.concat([blocks_gdf, pd.DataFrame(new_columns, index=blocks_gdf.index)], axis=1)
+    out = pd.concat(
+        [blocks_gdf, pd.DataFrame(new_columns, index=blocks_gdf.index)], axis=1
+    )
     return cast(gpd.GeoDataFrame, out)

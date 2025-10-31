@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,8 +10,10 @@ class TerritoryTransformationResponseTablesSchema(BaseModel):
         None, description="Provision values for the base scenario, by service name"
     )
     provision_total_after: Optional[Dict[str, float]] = Field(
-        None, description="Provision values for the transformed scenario, by service name"
+        None,
+        description="Provision values for the transformed scenario, by service name",
     )
+
 
 class TerritoryTransformationLayerResponse(TerritoryTransformationResponseTablesSchema):
     """
@@ -19,9 +21,11 @@ class TerritoryTransformationLayerResponse(TerritoryTransformationResponseTables
     Either 'before', 'after', or both can be present.
     Provision totals are optional numeric aggregates.
     """
+
     before: Optional[FeatureCollectionModel] = Field(
         None, description="GeoJSON FeatureCollection for the base (before) scenario"
     )
     after: Optional[FeatureCollectionModel] = Field(
-        None, description="GeoJSON FeatureCollection for the transformed (after) scenario"
+        None,
+        description="GeoJSON FeatureCollection for the transformed (after) scenario",
     )
