@@ -85,6 +85,8 @@ async def get_methods():
              summary="Create scenario-based task",
              description=(
                  "Queues an asynchronous **scenario-based** task.\n\n"
+                 "Currently supported:"
+                 "`territory_transformation`, `values_transformation`, `values_oriented_requirements` \n\n"
                  "**Caching behavior**: if `force=false` and a complete cached result exists "
                  "for the computed parameter hash, the endpoint returns `status=done` immediately. "
                  "Otherwise a task is queued and `status=queued` is returned.\n\n"
