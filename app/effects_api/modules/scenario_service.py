@@ -4,15 +4,23 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from blocksnet.blocks.aggregation import aggregate_objects
+from blocksnet.blocks.assignment import assign_land_use
 from blocksnet.blocks.cutting import cut_urban_blocks, preprocess_urban_objects
 from blocksnet.preprocessing.imputing import impute_buildings, impute_services
 from loguru import logger
 
 from app.clients.urban_api_client import UrbanAPIClient
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.effects_api.constants.const import LIVING_BUILDINGS_ID, ROADS_ID, WATER_ID
+from app.effects_api.constants.const import (
+    LAND_USE_RULES,
+    LIVING_BUILDINGS_ID,
+    ROADS_ID,
+    WATER_ID,
+)
 from app.effects_api.modules.buildings_service import adapt_buildings
 from app.effects_api.modules.functional_sources_service import adapt_functional_zones
+from app.effects_api.modules.service_type_service import adapt_service_types
 from app.effects_api.modules.services_service import adapt_services
 
 SOURCES_PRIORITY = ["PZZ", "OSM", "User"]
@@ -98,7 +106,8 @@ class ScenarioService:
             user_roads.geometry = close_gaps(user_roads, 1)
             roads = user_roads.explode(column="geometry")
         else:
-            raise http_exception(404, "No objects found for polygons cutting")
+            roads = None
+            water = None
 
         lines, polygons = preprocess_urban_objects(roads, None, water)
         blocks = cut_urban_blocks(boundaries, lines, polygons)
@@ -165,17 +174,124 @@ class ScenarioService:
         self, scenario_id: int, service_types: pd.DataFrame, token: str
     ):
         try:
-            gdf = await self.client.get_services_scenario(
+            res = await self.client.get_services_scenario(
                 scenario_id, centers_only=True, token=token
             )
+            features = res.get("features") or []
+
+            if not features:
+                logger.info(
+                    f"Scenario {scenario_id}: no services (features=[]) -> returning empty dict"
+                )
+                return {}
+
+            gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326").set_index(
+                "service_id", drop=False
+            )
             gdf = gdf.to_crs(gdf.estimate_utm_crs())
+
             gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
-            return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
+            return {st: impute_services(g, st) for st, g in gdfs.items()}
+
         except Exception as e:
-            logger.exception(e)
+            logger.exception(
+                f"Failed to fetch/process services for scenario {scenario_id}: {str(e)}"
+            )
             raise http_exception(
                 404,
                 f"No services found for scenario {scenario_id}",
                 _input={"scenario_id": scenario_id},
                 _detail={"error": repr(e)},
             ) from e
+
+    async def load_blocks_scenario(
+        self, scenario_id: int, token: str
+    ) -> gpd.GeoDataFrame:
+        gdf = await self.get_scenario_blocks(scenario_id, token)
+        gdf["site_area"] = gdf.area
+        return gdf
+
+    async def assign_land_use_to_blocks_scenario(
+        self,
+        blocks: gpd.GeoDataFrame,
+        scenario_id: int,
+        source: str | None,
+        year: int | None,
+        token: str,
+    ) -> gpd.GeoDataFrame:
+        fzones = await self.get_scenario_functional_zones(
+            scenario_id, token, source, year
+        )
+        fzones = fzones.to_crs(blocks.crs)
+        lu = assign_land_use(blocks, fzones, LAND_USE_RULES)
+        return blocks.join(lu.drop(columns=["geometry"]))
+
+    async def enrich_with_buildings_scenario(
+        self, blocks: gpd.GeoDataFrame, scenario_id: int, token: str
+    ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
+        buildings = await self.get_scenario_buildings(scenario_id, token)
+        if buildings is None:
+            blocks["count_buildings"] = 0
+            return blocks, None
+
+        buildings = buildings.to_crs(blocks.crs)
+        blocks_bld, _ = aggregate_objects(blocks, buildings)
+
+        blocks = blocks.join(
+            blocks_bld.drop(columns=["geometry"]).rename(
+                columns={"count": "count_buildings"}
+            )
+        )
+        blocks["count_buildings"] = blocks["count_buildings"].fillna(0).astype(int)
+        if "is_living" not in blocks.columns:
+            blocks["is_living"] = None
+        return blocks, buildings
+
+    async def enrich_with_services_scenario(
+        self, blocks: gpd.GeoDataFrame, scenario_id: int, token: str
+    ) -> gpd.GeoDataFrame:
+        stypes = await self.client.get_service_types()
+        stypes = await adapt_service_types(stypes, self.client)
+        sdict = await self.get_scenario_services(scenario_id, stypes, token)
+
+        for stype, services in sdict.items():
+            services = services.to_crs(blocks.crs)
+            b_srv, _ = aggregate_objects(blocks, services)
+            b_srv[["capacity", "count"]] = (
+                b_srv[["capacity", "count"]].fillna(0).astype(int)
+            )
+            blocks = blocks.join(
+                b_srv.drop(columns=["geometry"]).rename(
+                    columns={"capacity": f"capacity_{stype}", "count": f"count_{stype}"}
+                )
+            )
+        return blocks
+
+    async def aggregate_blocks_layer_scenario(
+        self,
+        scenario_id: int,
+        source: str | None = None,
+        year: int | None = None,
+        token: str | None = None,
+    ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
+
+        logger.info(f"[Scenario {scenario_id}] load blocks")
+        blocks = await self.load_blocks_scenario(scenario_id, token)
+
+        logger.info("Assigning land-use for scenario")
+        blocks = await self.assign_land_use_to_blocks_scenario(
+            blocks, scenario_id, source, year, token
+        )
+
+        logger.info("Aggregating buildings for scenario")
+        blocks, buildings = await self.enrich_with_buildings_scenario(
+            blocks, scenario_id, token
+        )
+
+        logger.info("Aggregating services for scenario")
+        blocks = await self.enrich_with_services_scenario(blocks, scenario_id, token)
+
+        blocks["is_project"] = True
+        logger.success(f"[scenario {scenario_id}] blocks layer ready")
+
+        return blocks, buildings

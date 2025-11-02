@@ -154,15 +154,11 @@ class UrbanAPIClient:
 
     async def get_services_scenario(
         self, scenario_id: int, token: str, **kwargs: Any
-    ) -> gpd.GeoDataFrame:
-        res = await self.json_handler.get(
+    ) -> dict:
+        return await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/services_with_geometry",
             headers={"Authorization": f"Bearer {token}"},
             params=kwargs,
-        )
-        features = res["features"]
-        return gpd.GeoDataFrame.from_features(features, crs=4326).set_index(
-            "service_id"
         )
 
     async def get_optimal_func_zone_request_data(
@@ -401,3 +397,11 @@ class UrbanAPIClient:
     async def get_social_values_info(self) -> dict[int, str]:
         res = await self.json_handler.get("/api/v1/social_values")
         return {item["soc_value_id"]: item["name"] for item in res}
+
+    async def get_territory_normatives(self, territory_id: int) -> pd.DataFrame:
+        res = await self.json_handler.get(
+            f"/api/v1/territory/{territory_id}/normatives", params={"last_only": True}
+        )
+        df = pd.DataFrame(res)
+        df["service_type_id"] = df["service_type"].apply(lambda st: st["id"])
+        return df.set_index("service_type_id", drop=True)

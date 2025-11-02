@@ -3,12 +3,13 @@ import json
 
 import geopandas as gpd
 import pandas as pd
+from blocksnet.relations import calculate_distance_matrix
 from loguru import logger
 from shapely.geometry.base import BaseGeometry
 from shapely.wkt import dumps, loads
 
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.effects_api.constants.const import COL_RU
+from app.effects_api.constants.const import COL_RU, ROADS_ID, SPEED
 from app.effects_api.modules.scenario_service import SOURCES_PRIORITY
 
 
@@ -28,9 +29,9 @@ async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
 
     return json.loads(gdf_copy.to_json(drop_id=True))
 
+
 def safe_gdf_to_geojson(
     gdf: gpd.GeoDataFrame,
-    *,
     to_epsg: int = 4326,
     round_ndigits: int = 6,
     drop_cols: tuple[str, ...] = (),
@@ -44,7 +45,9 @@ def safe_gdf_to_geojson(
     - Ensure all properties are JSON-serializable.
     - Return parsed dict (FeatureCollection).
     """
-    logger.info("Serializing GeoDataFrame to GeoJSON (EPSG:%s, round=%d)", to_epsg, round_ndigits)
+    logger.info(
+        f"Serializing GeoDataFrame to GeoJSON (EPSG:{to_epsg}, round={round_ndigits})"
+    )
     gdf2 = gdf.drop(columns=[c for c in drop_cols if c in gdf.columns]).copy()
     gdf2 = gdf2.to_crs(to_epsg)
     gdf2.geometry = round_coords(gdf2.geometry, round_ndigits)
@@ -56,7 +59,11 @@ def fc_to_gdf(fc: dict) -> gpd.GeoDataFrame:
 
 
 def is_fc(obj: dict) -> bool:
-    return isinstance(obj, dict) and obj.get("type") == "FeatureCollection" and "features" in obj
+    return (
+        isinstance(obj, dict)
+        and obj.get("type") == "FeatureCollection"
+        and "features" in obj
+    )
 
 
 def round_coords(
@@ -98,7 +105,10 @@ async def get_best_functional_zones_source(
 
     raise http_exception(404, "No available functional zone sources to choose from")
 
-def gdf_join_on_block_id(left: gpd.GeoDataFrame, right: pd.DataFrame, how: str = "left") -> gpd.GeoDataFrame:
+
+def gdf_join_on_block_id(
+    left: gpd.GeoDataFrame, right: pd.DataFrame, how: str = "left"
+) -> gpd.GeoDataFrame:
     """Join two frames by block_id index safely.
 
     - Ensures both indices are int.
@@ -129,3 +139,9 @@ def _ensure_block_index(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         gdf = gdf[~gdf.index.duplicated(keep="last")].sort_index()
     gdf.index.name = "block_id"
     return gdf
+
+
+def get_accessibility_matrix(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
+    crs = blocks.estimate_utm_crs()
+    dist_mx = calculate_distance_matrix(blocks.to_crs(crs))
+    return dist_mx // SPEED

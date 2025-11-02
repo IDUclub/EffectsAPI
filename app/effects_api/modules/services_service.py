@@ -1,5 +1,7 @@
 import geopandas as gpd
 import pandas as pd
+from blocksnet.blocks.aggregation import aggregate_objects
+from loguru import logger
 
 
 def _adapt_service_type(data: dict, service_types: pd.DataFrame) -> int:

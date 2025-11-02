@@ -11,14 +11,14 @@ class EffectsUtils:
         self.__name__ = "EffectsUtils"
         self.urban_api_client = urban_api_client
 
-    def _truthy_is_based(self, v: Any) -> bool:
+    def truthy_is_based(self, v: Any) -> bool:
         return v is True or v == 1 or (isinstance(v, str) and v.lower() == "true")
 
-    def _parent_id(self, s: Dict[str, Any]) -> Optional[int]:
+    def parent_id(self, s: Dict[str, Any]) -> Optional[int]:
         p = s.get("parent_scenario")
         return p.get("id") if isinstance(p, dict) else p
 
-    def _sid(self, s: Dict[str, Any]) -> Optional[int]:
+    def get_service_id(self, s: Dict[str, Any]) -> Optional[int]:
         try:
             return int(s.get("scenario_id"))
         except Exception:
@@ -36,15 +36,16 @@ class EffectsUtils:
         matches = [
             s
             for s in scenarios
-            if self._truthy_is_based(s.get("is_based"))
-            and self._parent_id(s) == regional_id
-            and self._sid(s) is not None
+            if self.truthy_is_based(s.get("is_based"))
+            and self.parent_id(s) == regional_id
+            and self.get_service_id(s) is not None
         ]
         if not matches:
             only_based = [
                 s
                 for s in scenarios
-                if self._truthy_is_based(s.get("is_based")) and self._sid(s) is not None
+                if self.truthy_is_based(s.get("is_based"))
+                and self.get_service_id(s) is not None
             ]
             if not only_based:
                 return scenario_id
@@ -54,4 +55,4 @@ class EffectsUtils:
             key=lambda x: (x.get("updated_at") is not None, x.get("updated_at")),
             reverse=True,
         )
-        return self._sid(matches[0]) or scenario_id
+        return self.get_service_id(matches[0]) or scenario_id

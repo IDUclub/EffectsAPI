@@ -3,7 +3,10 @@ import json
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+import geopandas as gpd
+import pandas as pd
 
 _CACHE_DIR = Path().absolute() / "__effects_cache__"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,7 +67,10 @@ class FileCache:
         return path
 
     def _latest_path(self, method: str, scenario_id: int) -> Path | None:
-        pattern = f"*__scenario_{scenario_id}__{_safe(method)}__*.json"
+        if method == "social_economical_metric":
+            pattern = f"*__project_{scenario_id}__{_safe(method)}__*.json"
+        else:
+            pattern = f"*__scenario_{scenario_id}__{_safe(method)}__*.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         return files[0] if files else None
 
@@ -75,8 +81,10 @@ class FileCache:
         params_hash: str,
         max_age: timedelta | None = None,
     ) -> dict[str, Any] | None:
-
-        pattern = f"*__scenario_{scenario_id}__{_safe(method)}__{params_hash}.json"
+        if method == "social_economical_metric":
+            pattern = f"*__project_{scenario_id}__{_safe(method)}__{params_hash}.json"
+        else:
+            pattern = f"*__scenario_{scenario_id}__{_safe(method)}__{params_hash}.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         if not files:
             return None
@@ -114,5 +122,82 @@ class FileCache:
         else:
             phash = self.params_hash(tail)
 
-        scenario_id = int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        scenario_id = (
+            int(scenario_id_raw) if scenario_id_raw.isdigit() else scenario_id_raw
+        )
         return method, scenario_id, phash
+
+    def _artifact_path(
+        self,
+        method: str,
+        owner_id: int,
+        phash: str,
+        name: str,
+        ext: Literal["parquet", "pkl"],
+    ) -> Path:
+        """Build path for a heavy artifact near JSON cache directory."""
+        fname = f"artifact__{_safe(method)}__{owner_id}__{phash}__{_safe(name)}.{ext}"
+        return _CACHE_DIR / fname
+
+    def save_df_artifact(
+        self,
+        df: pd.DataFrame,
+        method: str,
+        owner_id: int,
+        params: dict[str, Any],
+        name: str,
+        fmt: Literal["parquet", "pkl"] = "parquet",
+    ) -> Path:
+        """
+        Save a pandas DataFrame as a heavy artifact.
+        fmt='parquet' (default) is compact and fast; fmt='pkl' as a fallback.
+        """
+        phash = self.params_hash(params)
+        path = self._artifact_path(
+            method, owner_id, phash, name, "parquet" if fmt == "parquet" else "pkl"
+        )
+
+        if fmt == "parquet":
+            df.to_parquet(path, index=True)
+        else:
+            df.to_pickle(path)
+
+        return path
+
+    def load_df_artifact(self, path: Path) -> pd.DataFrame:
+        """Load a pandas DataFrame artifact by file extension."""
+        ext = path.suffix.lower()
+        if ext == ".parquet":
+            return pd.read_parquet(path)
+        elif ext == ".pkl":
+            return pd.read_pickle(path)
+        raise ValueError(f"Unsupported artifact extension: {ext}")
+
+    def save_gdf_artifact(
+        self,
+        gdf: gpd.GeoDataFrame,
+        method: str,
+        owner_id: int,
+        params: dict[str, Any],
+        name: str,
+        fmt: Literal["parquet", "pkl"] = "parquet",
+    ) -> Path:
+        phash = self.params_hash(params)
+        ext = "parquet" if fmt == "parquet" else "pkl"
+        path = self._artifact_path(method, owner_id, phash, name, ext)
+
+        if fmt == "parquet":
+            gdf.to_parquet(path, index=True)
+        else:
+            gdf.to_pickle(path)
+
+        return path
+
+    def load_gdf_artifact(self, path: Path) -> "gpd.GeoDataFrame":
+        """Load a GeoDataFrame artifact by file extension."""
+        ext = path.suffix.lower()
+        if ext == ".parquet":
+            return gpd.read_parquet(path)
+        elif ext == ".pkl":
+            return pd.read_pickle(path)
+        raise ValueError(f"Unsupported artifact extension: {ext}")
