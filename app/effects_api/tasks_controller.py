@@ -21,6 +21,7 @@ from .schemas.territory_transformation_response_schema import TerritoryTransform
 from .schemas.values_oriented_response_schema import ValuesOrientedResponseSchema
 from .schemas.values_tables_response_schema import ValuesOrientedResponseTablesSchema
 from .schemas.values_transformation_response_schema import ValuesTransformationSchema
+from ..common.dto.models import FeatureCollectionModel
 
 from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
@@ -400,7 +401,7 @@ async def get_values_oriented_requirements_table(
                 "For scenario-based methods the owner is a **scenario id**; for project-based "
                 "methods the owner is a **project id**."
             ),
-            response_model=Union[ValuesTransformationSchema, SocioEconomicMetricsResponseSchema])
+            response_model=Union[FeatureCollectionModel, SocioEconomicMetricsResponseSchema])
 async def get_layer(project_scenario_id: int, method_name: str):
     cached = file_cache.load_latest(method_name, project_scenario_id)
     if not cached:
@@ -409,7 +410,8 @@ async def get_layer(project_scenario_id: int, method_name: str):
     data = cached["data"]
 
     if method_name == "values_transformation":
-        return ValuesTransformationSchema(geojson=data)
+        fc = FeatureCollectionModel.model_validate(data)
+        return fc
 
     if method_name == "social_economical_metrics":
         data = cached["data"]["results"]
