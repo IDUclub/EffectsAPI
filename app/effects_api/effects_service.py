@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any, Dict, Literal
 
@@ -80,6 +81,8 @@ class EffectsService:
         scenario_service: ScenarioService,
         context_service: ContextService,
         effects_utils: EffectsUtils,
+        _indicator_name_cache: dict[int, str] = {},
+        _indicator_name_cache_lock: asyncio.Lock = asyncio.Lock()
     ):
         self.__name__ = "EffectsService"
         self.bn_social_regressor: SocialRegressor = SocialRegressor()
@@ -88,6 +91,8 @@ class EffectsService:
         self.scenario = scenario_service
         self.context = context_service
         self.effects_utils = effects_utils
+        self._indicator_name_cache_lock = _indicator_name_cache_lock
+        self._indicator_name_cache = _indicator_name_cache
 
     async def build_hash_params(
         self,
@@ -1127,6 +1132,86 @@ class EffectsService:
             return float(v)
         return v
 
+    async def _load_indicator_name_cache(self) -> dict[int, str]:
+        """Load indicator_id -> name_full mapping once, based on INDICATORS_MAPPING."""
+        # если уже загружено – просто вернуть
+        if self._indicator_name_cache:
+            return self._indicator_name_cache
+
+        async with self._indicator_name_cache_lock:
+            if self._indicator_name_cache:
+                return self._indicator_name_cache
+
+            indicator_ids: set[int] = set()
+            for v in INDICATORS_MAPPING.values():
+                if v is None:
+                    continue
+                try:
+                    indicator_ids.add(int(v))
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Skipping invalid indicator id in INDICATORS_MAPPING: %r", v
+                    )
+
+            logger.info(f"Preloading indicator names for {len(indicator_ids)} indicators")
+
+            id_to_name: dict[int, str] = {}
+            for ind_id in sorted(indicator_ids):
+                try:
+                    ind_info = await self.urban_api_client.get_indicator_info(ind_id)
+                    id_to_name[ind_id] = ind_info["name_full"]
+                except Exception as exc:
+                    logger.warning(
+                        f"Failed to fetch indicator info for id={ind_id}: {exc}",
+                    )
+
+            self._indicator_name_cache = id_to_name
+            logger.info(
+                f"Indicator name cache loaded: {len(self._indicator_name_cache)} entries"
+            )
+            return self._indicator_name_cache
+
+    async def _attach_indicator_names(
+            self,
+            df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Attach indicator full names based on numeric indicator_id.
+
+        Expects column 'indicator_id' with numeric IDs.
+        """
+        if df.empty or "indicator_id" not in df.columns:
+            logger.warning("DataFrame is empty or has no 'indicator_id' column")
+            return df
+
+        df = df.copy()
+
+        id_to_name = await self._load_indicator_name_cache()
+        if not id_to_name:
+            logger.warning("Indicator name cache is empty, leaving dataframe as is")
+            return df
+
+        def _map_name(v: Any) -> str | None:
+            if pd.isna(v):
+                return None
+            try:
+                return id_to_name.get(int(v))
+            except (TypeError, ValueError):
+                return None
+
+        df["indicator_name"] = (
+            df["indicator_id"]
+            .astype("float64")
+            .map(_map_name)
+        )
+
+        before = len(df)
+        df = df[df["indicator_name"].notna()].copy()
+        logger.info(
+            f"Attached indicator names for {len(df)} rows (filtered out {before - len(df)} rows without names)"
+        )
+
+        return df
+
     async def _compute_for_single_scenario(
         self,
         scenario_id: int,
@@ -1231,22 +1316,25 @@ class EffectsService:
         long_df["value"] = long_df["value"].round(2)
         long_df = long_df[
             long_df["indicator_id"].notna() & long_df["territory_id"].notna()
-        ].fillna(0)
+            ].fillna(0)
 
-        return long_df[["territory_id", "indicator_id", "value"]].to_dict(
+        long_df = await self._attach_indicator_names(long_df)
+
+        return long_df[["territory_id", "indicator_name", "value"]].to_dict(
             orient="records"
         )
 
-    def _pivot_results_by_territory(
-        self, results: dict[int, list[dict]]
-    ) -> dict[int, dict[int, dict[int, float]]]:
+    async def _pivot_results_by_territory(
+        self,
+        results: dict[int, list[dict]],
+    ) -> dict[int, dict[str, dict[int, float]]]:
         """
         Transform scenario-first results to territory-first pivot.
 
         Input:
             results: {
                 scenario_id: [
-                    {"territory_id": int, "indicator_id": int, "value": number},
+                    {"territory_id": int, "indicator_name": str, "value": number},
                     ...
                 ],
                 ...
@@ -1254,36 +1342,63 @@ class EffectsService:
 
         Output:
             {
-              territory_id: [
-                {"indicator_id": int, <scenario_id>: number, <scenario_id>: number, ...},
+              territory_id: {
+                indicator_name: {
+                    scenario_id: value | None,
+                    ...
+                },
                 ...
-              ],
+              },
               ...
             }
         """
-        pivot: dict[int, dict[int, dict[int, float]]] = {}
+        pivot: dict[int, dict[str, dict[int, float]]] = {}
 
         for scenario_id, records in results.items():
-            if not records:
-                continue
+
             for rec in records:
-                try:
-                    t_id = int(rec["territory_id"])
-                    ind_id = int(rec["indicator_id"])
-                    val = rec.get("value")
-                except (KeyError, TypeError, ValueError) as exc:
+                if not isinstance(rec, dict):
                     logger.warning(
-                        f"[Effects] Skip bad record in scenario {scenario_id}: {rec} ({exc})"
+                        f"[Effects] Skip non-dict record in scenario {scenario_id}: {rec}"
                     )
                     continue
 
-                if t_id not in pivot:
-                    pivot[t_id] = {}
-                if ind_id not in pivot[t_id]:
-                    pivot[t_id][ind_id] = {}
-                pivot[t_id][ind_id][int(scenario_id)] = val
+                try:
+                    t_id = int(rec["territory_id"])
+                    ind_name = str(rec["indicator_name"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        f"[Effects] Skip record without proper territory/indicator "
+                        f"in scenario {scenario_id}: {rec} ({exc})"
+                    )
+                    continue
 
-        logger.info(f"[Effects] Pivoted to nested format: {len(pivot)} territories.")
+                val_raw = rec.get("value")
+                try:
+                    val = float(val_raw) if val_raw is not None else None
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        f"[Effects] Failed to parse value for scenario {scenario_id}, "
+                        f"territory {t_id}, indicator '{ind_name}': {val_raw} ({exc})"
+                    )
+                    val = None
+
+                terr_dict = pivot.setdefault(t_id, {})
+                ind_dict = terr_dict.setdefault(ind_name, {})
+                ind_dict[int(scenario_id)] = val
+
+        logger.info(f"[Effects] Pivoted to nested format (names): {len(pivot)} territories.")
+
+        all_scenario_ids = list(results.keys())
+        if all_scenario_ids:
+            logger.info(
+                f"[Effects] Normalizing scenario coverage for {len(all_scenario_ids)} scenarios"
+            )
+            for t_id, terr_dict in pivot.items():
+                for ind_name, scenario_dict in terr_dict.items():
+                    for sid in all_scenario_ids:
+                        scenario_dict.setdefault(int(sid), None)
+
         return pivot
 
     async def evaluate_social_economical_metrics(
@@ -1339,25 +1454,34 @@ class EffectsService:
 
         for s in target:
             sid = int(s["scenario_id"])
-            proj_src, proj_year = (
-                await self.urban_api_client.get_optimal_func_zone_request_data(
-                    token=token, data_id=sid, source=None, year=None, project=True
+            try:
+                proj_src, proj_year = (
+                    await self.urban_api_client.get_optimal_func_zone_request_data(
+                        token=token, data_id=sid, source=None, year=None, project=True
+                    )
                 )
-            )
 
-            records = await self._compute_for_single_scenario(
-                sid,
-                context_blocks=context_blocks,
-                context_territories_gdf=context_territories_gdf,
-                service_types_df=service_types,
-                proj_src=proj_src,
-                proj_year=proj_year,
-                token=token,
-                only_parent_ids=only_parent_ids,
-            )
-            results[sid] = records
+                records = await self._compute_for_single_scenario(
+                    sid,
+                    context_blocks=context_blocks,
+                    context_territories_gdf=context_territories_gdf,
+                    service_types_df=service_types,
+                    proj_src=proj_src,
+                    proj_year=proj_year,
+                    token=token,
+                    only_parent_ids=only_parent_ids,
+                )
 
-        results = self._pivot_results_by_territory(results)
+                results[sid] = records
+
+            except Exception as exc:
+                logger.error(
+                    f"[Effects] Scenario {sid} failed during socio-economic computation: {exc}"
+                )
+                logger.exception(exc)
+                results[sid] = []
+
+        results = await self._pivot_results_by_territory(results)
 
         project_info = await self.urban_api_client.get_project(project_id, token)
         updated_at = project_info.get("updated_at")
