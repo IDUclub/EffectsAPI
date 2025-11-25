@@ -1452,8 +1452,7 @@ class EffectsService:
         only_parent_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
         results: dict[int, list[dict]] = {}
 
-        for s in target[:6]: #TODO не забыть убрать
-        # for s in target:
+        for s in target:
             sid = int(s["scenario_id"])
             try:
                 proj_src, proj_year = (
