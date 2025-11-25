@@ -405,3 +405,7 @@ class UrbanAPIClient:
         df = pd.DataFrame(res)
         df["service_type_id"] = df["service_type"].apply(lambda st: st["id"])
         return df.set_index("service_type_id", drop=True)
+
+    async def get_indicator_info(self, indicator_id: int) -> dict:
+        res = await self.json_handler.get(f"/api/v1/indicators/{indicator_id}")
+        return res
