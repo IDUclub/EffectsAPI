@@ -1,3 +1,5 @@
+from typing import Final
+
 from blocksnet.analysis.indicators.socio_economic import (
     DemographicIndicator,
     EcologicalIndicator,
@@ -322,3 +324,69 @@ INDICATORS_MAPPING = {
 }
 
 SPEED = 5 * 1_000 / 60
+
+URBANOMY_LAND_USE_RULES: Final[dict[str, LandUse]] = {
+    'Потенциал развития среднеэтажной жилой застройки': LandUse.RESIDENTIAL,
+    "Потенциал развития застройки общественно-деловой зоны": LandUse.BUSINESS,
+    "Потенциал развития застройки рекреационной зоны": LandUse.RECREATION,
+    "Потенциал развития застройки зоны специального назначения": LandUse.SPECIAL,
+    "Потенциал развития застройки промышленной зоны": LandUse.INDUSTRIAL,
+    "Потенциал развития застройки сельскохозяйственной зоны": LandUse.AGRICULTURE,
+    "Потенциал развития застройки транспортной зоны": LandUse.TRANSPORT,
+}
+
+benchmarks_demo = {
+    LandUse.RESIDENTIAL: {
+        "cost_build": 45_000,
+        "price_sale": 120_000,
+        "construction_years": 3,
+        "sale_years": 3,
+        "opex_rate": 800,
+    },
+    LandUse.BUSINESS: {
+        "cost_build": 55_000,
+        "rent_annual": 25_000,
+        "rent_years": 12,
+        "construction_years": 4,
+        "opex_rate": 1_300,
+    },
+    LandUse.RECREATION: {
+        "cost_build": 20_000,
+        "rent_annual": 4_500,
+        "rent_years": 15,
+        "construction_years": 3,
+        "opex_rate": 1_000,
+    },
+    LandUse.SPECIAL: {
+        "cost_build": 35_000,
+        "rent_annual": 11_000,
+        "rent_years": 15,
+        "construction_years": 3,
+        "opex_rate": 1_500,
+    },
+    LandUse.INDUSTRIAL: {
+        "cost_build": 38_000,
+        "rent_annual": 14_800,
+        "rent_years": 12,
+        "construction_years": 3,
+        "opex_rate": 700,
+    },
+    LandUse.AGRICULTURE: {
+        "cost_build": 25_000,
+        "rent_annual": 6_500,
+        "rent_years": 15,
+        "construction_years": 3,
+        "opex_rate": 300,
+    },
+    LandUse.TRANSPORT: {
+        "cost_build": 18_000,
+        "rent_annual": 6_200,
+        "rent_years": 15,
+        "construction_years": 3,
+        "opex_rate": 600,
+    },
+}
+
+deafaut_cfg = {
+    "population": 300_000,
+}
