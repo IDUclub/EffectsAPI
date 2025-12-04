@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict, Literal
 
@@ -1435,9 +1436,85 @@ class EffectsService:
 
         long_df = await self._attach_indicator_names(long_df)
 
-        return long_df[["territory_id", "indicator_name", "value"]].to_dict(
-            orient="records"
-        )
+        territory_id_hint: int | None = None
+        if "is_project" in before_blocks.columns:
+            proj_mask = before_blocks["is_project"].fillna(False).astype(bool)
+            territory_id_hint = self._pick_single_territory_id(before_blocks.loc[proj_mask, "parent"])
+
+        urbanomy_records: list[dict] = []
+        try:
+            if territory_id_hint is not None:
+                urbanomy_records = await self._compute_urbanomy_for_single_scenario(
+                    scenario_id=scenario_id,
+                    scenario_blocks=scenario_blocks,
+                    context_blocks=context_blocks,
+                    context_territories_gdf=context_territories_gdf,
+                    token=token,
+                    only_parent_ids=only_parent_ids,
+                    territory_id_hint=territory_id_hint,
+                )
+        except Exception as exc:
+            logger.warning(f"Urbanomy failed for scenario={scenario_id}: {exc}")
+
+        records = long_df[["territory_id", "indicator_name", "value"]].to_dict(orient="records")
+
+        if urbanomy_records:
+            for r in urbanomy_records:
+                records.append(
+                    {
+                        "territory_id": self._clean_number(r.get("territory_id")),
+                        "indicator_name": r.get("indicator_name"),
+                        "value": self._clean_number(r.get("value")),
+                    }
+                )
+
+        return records
+
+    def _json_safe_number(self, v: Any) -> float | int | None:
+        """Convert any numeric-like value to a JSON-safe primitive (no NaN/Inf).
+
+        Supports strings with thousand separators like '12 438 136 946' or '2\u00A0339\u00A0984'.
+        """
+        if v is None:
+            return None
+
+        if isinstance(v, np.generic):
+            v = v.item()
+
+        if isinstance(v, bool):
+            return int(v)
+
+        if isinstance(v, int):
+            return v
+
+        if isinstance(v, float):
+            return v if math.isfinite(v) else None
+
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+
+            s = re.compile(r"[\s\u00A0\u202F]").sub("", s)
+            s = s.replace(",", ".")
+            s = re.sub(r"[^0-9\.\-]+", "", s)
+
+            if s in {"", "-", ".", "-."}:
+                return None
+
+            try:
+                f = float(s)
+            except ValueError:
+                return None
+
+            return f if math.isfinite(f) else None
+
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+
+        return f if math.isfinite(f) else None
 
     async def _pivot_results_by_territory(
         self,
@@ -1489,12 +1566,11 @@ class EffectsService:
                     continue
 
                 val_raw = rec.get("value")
-                try:
-                    val = float(val_raw) if val_raw is not None else None
-                except (TypeError, ValueError) as exc:
+                val = self._json_safe_number(val_raw)
+                if val_raw is not None and val is None:
                     logger.warning(
                         f"[Effects] Failed to parse value for scenario {scenario_id}, "
-                        f"territory {t_id}, indicator '{ind_name}': {val_raw} ({exc})"
+                        f"territory {t_id}, indicator '{ind_name}': {val_raw}"
                     )
                     val = None
 
@@ -1544,9 +1620,7 @@ class EffectsService:
 
         mode = int(s.mode().iat[0])
         logger.warning(
-            "Multiple territory_ids detected for scenario project blocks (%s). Using mode=%s",
-            sorted(map(int, uniq)),
-            mode,
+            f"Multiple territory_ids detected for scenario project blocks {sorted(map(int, uniq))}. Using mode={mode}",
         )
         return mode
 
@@ -1579,6 +1653,7 @@ class EffectsService:
             context_territories_gdf: gpd.GeoDataFrame,
             token: str,
             only_parent_ids: set[int] | None = None,
+            territory_id_hint: int | None = None,
     ) -> list[dict]:
         """Compute Urbanomy metrics for one scenario and return records:
         [{territory_id, indicator_id, indicator_name, value}, ...]
@@ -1612,21 +1687,33 @@ class EffectsService:
             logger.info("Urbanomy: no project blocks for scenario=%s", scenario_id)
             return []
 
-        territories = context_territories_gdf.to_crs(project_blocks.crs)
-        assigned = assign_objects(project_blocks, territories.rename(columns={"parent": "name"}))
-        project_blocks["parent"] = pd.to_numeric(assigned["name"], errors="coerce")
+        territory_id: int | None = None
 
-        if only_parent_ids:
-            project_blocks = project_blocks[project_blocks["parent"].isin(only_parent_ids)].copy()
+        if territory_id_hint is not None:
+            territory_id = int(territory_id_hint)
+            if only_parent_ids and territory_id not in only_parent_ids:
+                logger.info(
+                    "Urbanomy: territory_id=%s not in only_parent_ids, skipping scenario=%s",
+                    territory_id,
+                    scenario_id,
+                )
+                return []
+        else:
+            territories = context_territories_gdf.to_crs(project_blocks.crs)
+            assigned = assign_objects(project_blocks, territories.rename(columns={"parent": "name"}))
+            project_blocks["parent"] = pd.to_numeric(assigned["name"], errors="coerce")
 
-        territory_id = self._pick_single_territory_id(project_blocks["parent"])
-        if territory_id is None:
-            logger.warning("Urbanomy: failed to detect territory_id for scenario=%s", scenario_id)
-            return []
+            if only_parent_ids:
+                project_blocks = project_blocks[project_blocks["parent"].isin(only_parent_ids)].copy()
 
-        project_blocks = project_blocks[project_blocks["parent"] == territory_id].copy()
-        if project_blocks.empty:
-            return []
+            territory_id = self._pick_single_territory_id(project_blocks["parent"])
+            if territory_id is None:
+                logger.warning("Urbanomy: failed to detect territory_id for scenario=%s", scenario_id)
+                return []
+
+            project_blocks = project_blocks[project_blocks["parent"] == territory_id].copy()
+            if project_blocks.empty:
+                return []
 
         potential_df = await self._fetch_land_use_potentials(scenario_id=scenario_id, token=token)
 
@@ -1651,7 +1738,7 @@ class EffectsService:
         df = df[df["value"].notna()].copy()
 
         df["territory_id"] = int(territory_id)
-        df = df.rename(columns={"indicator": "indicator_name"})  # временное имя из расчёта
+        df = df.rename(columns={"indicator": "indicator_name"})
 
         df = await self._attach_urbanomy_indicator_names(df)
 
