@@ -390,3 +390,26 @@ benchmarks_demo = {
 deafaut_cfg = {
     "population": 300_000,
 }
+
+discount_rate: float = 0.18
+
+URBANOMY_INDICATORS_MAPPING: dict[str, int] = {
+    "Объём инвестиций в основной капитал на душу населения": 152,
+    "Валовый региональный продукт на душу населения": 154,
+    "Доходы бюджета территории": 368,
+    "Средний уровень заработной платы": 170,
+    "Износ основного фонда (тыс. руб.)": 367,
+}
+
+URBANOMY_BLOCK_COLS = [
+    "geometry",
+    "residential",
+    "business",
+    "recreation",
+    "industrial",
+    "transport",
+    "special",
+    "agriculture",
+    "land_use",
+    "share",
+]
