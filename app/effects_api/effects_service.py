@@ -1401,39 +1401,37 @@ class EffectsService:
 
         return pivot
 
-    async def evaluate_social_economical_metrics(
-        self, token: str, params: SocioEconomicByProjectDTO
-    ):
+    def _filter_by_territories(self, results: dict, territory_ids: set[int] | None) -> dict:
+        """Filter cached results by territory ids if provided."""
+        if not territory_ids:
+            return results
+        return {tid: results[tid] for tid in territory_ids if tid in results}
+
+    async def evaluate_social_economical_metrics(self, token: str, params: SocioEconomicByProjectDTO):
         """
         Project-level multi-scenario calculation with a shared context.
         Return: {territory_id: {indicator_id: {scenario_id: value}}}
         """
-
         project_id = params.project_id
         parent_id = params.regional_scenario_id
-
         method_name = "social_economical_metrics"
 
-        only_parent_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
+        requested_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
 
         params_for_hash = {
             "project_id": project_id,
             "regional_scenario_id": parent_id,
-            "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else [],
         }
 
         if not params.force:
             phash = self.cache.params_hash(params_for_hash)
             cached = self.cache.load(method_name, project_id, phash)
             if cached:
-                logger.info(
-                    f"[Effects] cache hit for project {project_id}, returning cached data"
-                )
-                return cached["results"]
+                logger.info(f"[Effects] cache hit for project {project_id}, parent={parent_id}")
+                results_all = cached["results"]
+                return self._filter_by_territories(results_all, requested_ids)
         else:
-            logger.info(
-                f"[Effects] force=True, recalculating metrics for project {project_id}"
-            )
+            logger.info(f"[Effects] force=True, recalculating metrics for project {project_id}, parent={parent_id}")
 
         context_blocks, context_territories_gdf, service_types = (
             await self.context.get_shared_context(project_id, token)
@@ -1441,24 +1439,20 @@ class EffectsService:
 
         scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
         target = [
-            s
-            for s in scenarios
+            s for s in scenarios
             if (s.get("parent_scenario") or {}).get("id") == parent_id
         ]
-        logger.info(
-            f"[Effects] matched {len(target)} scenarios in project {project_id} (parent={parent_id})"
-        )
+        logger.info(f"[Effects] matched {len(target)} scenarios in project {project_id} (parent={parent_id})")
 
-        only_parent_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
         results: dict[int, list[dict]] = {}
+
+        only_parent_ids = None
 
         for s in target:
             sid = int(s["scenario_id"])
             try:
-                proj_src, proj_year = (
-                    await self.urban_api_client.get_optimal_func_zone_request_data(
-                        token=token, data_id=sid, source=None, year=None, project=True
-                    )
+                proj_src, proj_year = await self.urban_api_client.get_optimal_func_zone_request_data(
+                    token=token, data_id=sid, source=None, year=None, project=True
                 )
 
                 records = await self._compute_for_single_scenario(
@@ -1471,17 +1465,13 @@ class EffectsService:
                     token=token,
                     only_parent_ids=only_parent_ids,
                 )
-
                 results[sid] = records
-
             except Exception as exc:
-                logger.error(
-                    f"[Effects] Scenario {sid} failed during socio-economic computation: {exc}"
-                )
+                logger.error(f"[Effects] Scenario {sid} failed during socio-economic computation: {exc}")
                 logger.exception(exc)
                 results[sid] = []
 
-        results = await self._pivot_results_by_territory(results)
+        results_all = await self._pivot_results_by_territory(results)
 
         project_info = await self.urban_api_client.get_project(project_id, token)
         updated_at = project_info.get("updated_at")
@@ -1490,11 +1480,10 @@ class EffectsService:
             method_name,
             project_id,
             params_for_hash,
-            {"results": results},
+            {"results": results_all},
             scenario_updated_at=updated_at,
         )
 
-        logger.success(
-            f"[Effects] socio-economic metrics cached for project_id={project_id}"
-        )
-        return results
+        logger.success(f"[Effects] socio-economic metrics cached for project_id={project_id}, parent={parent_id}")
+
+        return self._filter_by_territories(results_all, requested_ids)
