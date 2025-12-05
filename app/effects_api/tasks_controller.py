@@ -160,14 +160,14 @@ async def create_scenario_task(
                  "**Task id format**: `{method}_{project_id}_{phash}`"
              ))
 async def create_project_task(
-    method: Literal["social_economical_metrics"],
+    method: Literal["social_economical_metrics", "urbanomy_metrics"],
     params: Annotated[SocioEconomicByProjectDTO, Depends()],
     token: Annotated[str, Depends(verify_token)],
 ):
     """
     separate endpoint for project-based tasks (e.g., socio_economics).
     """
-    if method != "social_economical_metrics":
+    if method not in ["social_economical_metrics", "urbanomy_metrics"]:
         raise http_exception(400, f"method '{method}' is not project-based", method)
 
     try:
