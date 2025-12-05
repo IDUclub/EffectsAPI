@@ -1684,7 +1684,7 @@ class EffectsService:
             project_blocks = blocks_with_land_value.copy()
 
         if project_blocks.empty:
-            logger.info("Urbanomy: no project blocks for scenario=%s", scenario_id)
+            logger.info(f"Urbanomy: no project blocks for scenario={scenario_id}")
             return []
 
         territory_id: int | None = None
@@ -1693,10 +1693,7 @@ class EffectsService:
             territory_id = int(territory_id_hint)
             if only_parent_ids and territory_id not in only_parent_ids:
                 logger.info(
-                    "Urbanomy: territory_id=%s not in only_parent_ids, skipping scenario=%s",
-                    territory_id,
-                    scenario_id,
-                )
+                    f"Urbanomy: territory_id={territory_id} not in only_parent_ids, skipping scenario={scenario_id}")
                 return []
         else:
             territories = context_territories_gdf.to_crs(project_blocks.crs)
@@ -1708,7 +1705,7 @@ class EffectsService:
 
             territory_id = self._pick_single_territory_id(project_blocks["parent"])
             if territory_id is None:
-                logger.warning("Urbanomy: failed to detect territory_id for scenario=%s", scenario_id)
+                logger.warning(f"Urbanomy: failed to detect territory_id for scenario={scenario_id}")
                 return []
 
             project_blocks = project_blocks[project_blocks["parent"] == territory_id].copy()
@@ -1785,14 +1782,13 @@ class EffectsService:
         params_for_hash = {
             "project_id": project_id,
             "regional_scenario_id": parent_id,
-            "territory_ids": sorted(list(only_parent_ids)) if only_parent_ids else [],
         }
 
         if not params.force:
             phash = self.cache.params_hash(params_for_hash)
             cached = self.cache.load(method_name, project_id, phash)
             if cached:
-                logger.info("[Urbanomy] cache hit for project %s", project_id)
+                logger.info(f"[Urbanomy] cache hit for project {parent_id}")
                 return self._sanitize_for_json(cached["results"])
 
         context_blocks, context_territories_gdf, _ = await self.context.get_shared_context(project_id, token)
@@ -1827,7 +1823,7 @@ class EffectsService:
                 )
                 scenario_results[sid] = records
             except Exception as exc:
-                logger.error("[Urbanomy] Scenario %s failed: %s", sid, exc)
+                logger.error(f"[Urbanomy] Scenario {sid} failed: {exc}")
                 logger.exception(exc)
                 scenario_results[sid] = []
 
@@ -1873,22 +1869,24 @@ class EffectsService:
             phash = self.cache.params_hash(params_for_hash)
             cached = self.cache.load(method_name, project_id, phash)
             if cached:
-                logger.info("[Effects] cache hit for project %s, parent=%s", project_id, parent_id)
+                logger.info(f"[Effects] cache hit for project {project_id}, parent={parent_id}")
                 results_all = self._sanitize_for_json(cached["results"])
                 return self._filter_by_territories(results_all, requested_ids)
         else:
-            logger.info("[Effects] force=True, recalculating metrics for project %s, parent=%s", project_id, parent_id)
+            logger.info(f"[Effects] force=True, recalculating metrics for project {project_id}, parent={parent_id}")
 
         context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id,
                                                                                                        token)
 
         scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
         target = [s for s in scenarios if (s.get("parent_scenario") or {}).get("id") == parent_id]
-        logger.info("[Effects] matched %s scenarios in project %s (parent=%s)", len(target), project_id, parent_id)
+        logger.info(f"[Effects] matched {len(target)} scenarios in project {project_id} (parent={parent_id})")
 
         only_parent_ids = None
 
         results: dict[int, list[dict]] = {}
+
+        only_parent_ids = None
 
         for s in target:
             sid = int(s["scenario_id"])
@@ -1912,11 +1910,8 @@ class EffectsService:
                     only_parent_ids=only_parent_ids,
                 )
                 results[sid] = records
-
             except Exception as exc:
-                logger.error(
-                    f"[Effects] Scenario {sid} failed during socio-economic computation: {exc}"
-                )
+                logger.error(f"[Effects] Scenario {sid} failed during socio-economic computation: {exc}")
                 logger.exception(exc)
                 results[sid] = []
 
