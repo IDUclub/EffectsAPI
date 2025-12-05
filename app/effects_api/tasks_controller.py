@@ -325,7 +325,7 @@ async def get_values_oriented_requirements_layer(
     service_name: str,
     token: str = Depends(verify_token),
 ):
-    base_id = await effects_utils._resolve_base_id(token, scenario_id)
+    base_id = await effects_utils.resolve_base_id(token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
