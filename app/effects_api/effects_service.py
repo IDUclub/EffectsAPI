@@ -89,29 +89,31 @@ class EffectsService:
         scenario_service: ScenarioService,
         context_service: ContextService,
         effects_utils: EffectsUtils,
-        _land_price_model_lock: asyncio.Lock = asyncio.Lock(),
-        _indicator_name_cache: dict[int, str] = {},
-        _indicator_name_cache_lock: asyncio.Lock = asyncio.Lock(),
+        _land_price_model_lock: asyncio.Lock | None = None,
+        _indicator_name_cache: dict[int, str] | None = None,
+        _indicator_name_cache_lock: asyncio.Lock | None = None,
         _land_price_model: CatBoostRegressor | None = None,
         _catboost_model_path: str = "./catboost_model.cbm",
-        _urbanomy_indicator_name_cache: dict[int, str] = {},
-        _urbanomy_indicator_name_cache_lock = asyncio.Lock()
-
+        _urbanomy_indicator_name_cache: dict[int, str] | None = None,
+        _urbanomy_indicator_name_cache_lock: asyncio.Lock | None = None,
     ):
         self._land_price_model = _land_price_model
-        self._land_price_model_lock = _land_price_model_lock
-        self.__name__ = "EffectsService"
-        self.bn_social_regressor: SocialRegressor = SocialRegressor()
+        self._land_price_model_lock = _land_price_model_lock or asyncio.Lock()
+
+        self._indicator_name_cache = _indicator_name_cache or {}
+        self._indicator_name_cache_lock = _indicator_name_cache_lock or asyncio.Lock()
+
+        self._urbanomy_indicator_name_cache = _urbanomy_indicator_name_cache or {}
+        self._urbanomy_indicator_name_cache_lock = _urbanomy_indicator_name_cache_lock or asyncio.Lock()
+
+        self._catboost_model_path = _catboost_model_path
+
         self.urban_api_client = urban_api_client
         self.cache = cache
         self.scenario = scenario_service
         self.context = context_service
         self.effects_utils = effects_utils
-        self._indicator_name_cache_lock = _indicator_name_cache_lock
-        self._indicator_name_cache = _indicator_name_cache
-        self._catboost_model_path = _catboost_model_path
-        self._urbanomy_indicator_name_cache = _urbanomy_indicator_name_cache
-        self._urbanomy_indicator_name_cache_lock = _urbanomy_indicator_name_cache_lock
+        self.__name__ = "EffectsService"
 
     async def build_hash_params(
         self,
@@ -1191,9 +1193,6 @@ class EffectsService:
 
     async def _load_urbanomy_indicator_name_cache(self) -> dict[int, str]:
         """Load Urbanomy indicator_id -> name_full mapping once."""
-        if self._urbanomy_indicator_name_cache:
-            return self._urbanomy_indicator_name_cache
-
         async with self._urbanomy_indicator_name_cache_lock:
             if self._urbanomy_indicator_name_cache:
                 return self._urbanomy_indicator_name_cache
@@ -1293,9 +1292,6 @@ class EffectsService:
 
     async def _get_land_price_model(self) -> CatBoostRegressor:
         """Load CatBoost model once and reuse it."""
-        if self._land_price_model is not None:
-            return self._land_price_model
-
         async with self._land_price_model_lock:
             if self._land_price_model is not None:
                 return self._land_price_model
@@ -1766,80 +1762,6 @@ class EffectsService:
             for ind_id, scn_map in terr.items():
                 for sid in sids:
                     scn_map.setdefault(sid, None)
-
-        return pivot
-
-    async def evaluate_urbanomy_metrics(self, token: str, params: SocioEconomicByProjectDTO):
-        """
-        Urbanomy project-level calculation.
-        Return: {territory_id: {indicator_id: {scenario_id: value}}}
-        """
-        project_id = params.project_id
-        parent_id = params.regional_scenario_id
-        method_name = "urbanomy_metrics"
-
-        only_parent_ids = {int(x) for x in getattr(params, "territory_ids", [])} or None
-        params_for_hash = {
-            "project_id": project_id,
-            "regional_scenario_id": parent_id,
-        }
-
-        if not params.force:
-            phash = self.cache.params_hash(params_for_hash)
-            cached = self.cache.load(method_name, project_id, phash)
-            if cached:
-                logger.info(f"[Urbanomy] cache hit for project {parent_id}")
-                return self._sanitize_for_json(cached["results"])
-
-        context_blocks, context_territories_gdf, _ = await self.context.get_shared_context(project_id, token)
-
-        scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
-        target = [s for s in scenarios if (s.get("parent_scenario") or {}).get("id") == parent_id]
-
-        scenario_results: dict[int, list[dict]] = {}
-
-        for s in target:
-            sid = int(s["scenario_id"])
-            try:
-                proj_src, proj_year = await self.urban_api_client.get_optimal_func_zone_request_data(
-                    token=token,
-                    data_id=sid,
-                    source=None,
-                    year=None,
-                    project=True,
-                )
-
-                scenario_blocks, _ = await self.scenario.aggregate_blocks_layer_scenario(
-                    sid, proj_src, proj_year, token
-                )
-
-                records = await self._compute_urbanomy_for_single_scenario(
-                    scenario_id=sid,
-                    scenario_blocks=scenario_blocks,
-                    context_blocks=context_blocks,
-                    context_territories_gdf=context_territories_gdf,
-                    token=token,
-                    only_parent_ids=only_parent_ids,
-                )
-                scenario_results[sid] = records
-            except Exception as exc:
-                logger.error(f"[Urbanomy] Scenario {sid} failed: {exc}")
-                logger.exception(exc)
-                scenario_results[sid] = []
-
-        pivot = self._pivot_urbanomy_by_territory_and_indicator(scenario_results)
-        pivot = self._sanitize_for_json(pivot)
-
-        project_info = await self.urban_api_client.get_project(project_id, token)
-        updated_at = project_info.get("updated_at")
-
-        self.cache.save(
-            method_name,
-            project_id,
-            params_for_hash,
-            {"results": pivot},
-            scenario_updated_at=updated_at,
-        )
 
         return pivot
 
