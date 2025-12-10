@@ -17,7 +17,7 @@ TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
     "values_transformation": effects_service.values_transformation,
     "values_oriented_requirements": effects_service.values_oriented_requirements,
-    "social_economical_metrics": effects_service.evaluate_social_economical_metrics,
+    "social_economical_metrics": effects_service.evaluate_social_economical_metrics
 }
 
 
@@ -115,7 +115,7 @@ async def create_task(
         dict: { "task_id": str, "status": "queued" | "running" | "done" }
     """
 
-    project_based_methods = {"social_economical_metrics"}
+    project_based_methods = {"social_economical_metrics", "urbanomy_metrics"}
 
     if method in project_based_methods:
         owner_id = getattr(params, "project_id", None)

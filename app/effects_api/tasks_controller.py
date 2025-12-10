@@ -1,7 +1,7 @@
 import asyncio
 from typing import Annotated, Union, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.params import Depends
 from loguru import logger
 from starlette.responses import JSONResponse
@@ -167,7 +167,7 @@ async def create_project_task(
     """
     separate endpoint for project-based tasks (e.g., socio_economics).
     """
-    if method != "social_economical_metrics":
+    if method not in ["social_economical_metrics"]:
         raise http_exception(400, f"method '{method}' is not project-based", method)
 
     try:
@@ -402,7 +402,40 @@ async def get_values_oriented_requirements_table(
                 "methods the owner is a **project id**."
             ),
             response_model=Union[FeatureCollectionModel, SocioEconomicMetricsResponseSchema])
-async def get_layer(project_scenario_id: int, method_name: str):
+async def get_layer(
+    project_scenario_id: int,
+    method_name: str,
+    regional_scenario_id: int | None = Query(
+        default=None,
+        description="Required for social_economical_metrics (project-based).",
+    ),
+):
+    if method_name == "social_economical_metrics":
+        if regional_scenario_id is None:
+            raise http_exception(
+                400,
+                "regional_scenario_id is required for social_economical_metrics",
+                {"project_id": project_scenario_id},
+            )
+
+        params_for_hash = {
+            "project_id": project_scenario_id,
+            "regional_scenario_id": regional_scenario_id,
+        }
+        phash = file_cache.params_hash(params_for_hash)
+
+        cached = file_cache.load(method_name, project_scenario_id, phash)
+        if not cached:
+            raise http_exception(
+                404,
+                "no saved result for this project + regional_scenario_id",
+                {"project_id": project_scenario_id, "regional_scenario_id": regional_scenario_id},
+            )
+
+        results = cached["data"]["results"]
+
+        return SocioEconomicMetricsResponseSchema(results=results)
+
     cached = file_cache.load_latest(method_name, project_scenario_id)
     if not cached:
         raise http_exception(404, "no saved result for this scenario", project_scenario_id)
@@ -410,16 +443,14 @@ async def get_layer(project_scenario_id: int, method_name: str):
     data = cached["data"]
 
     if method_name == "values_transformation":
-        fc = FeatureCollectionModel.model_validate(data)
-        return fc
+        return FeatureCollectionModel.model_validate(data)
 
-    if method_name == "social_economical_metrics":
-        data = cached["data"]["results"]
-        return SocioEconomicMetricsResponseSchema(results=data)
-
-    else:
-        raise http_exception(400, "Method not implemented", method_name, "Allowed methods: values_transformation, social_economical_metrics")
-
+    raise http_exception(
+        400,
+        "Method not implemented",
+        method_name,
+        "Allowed methods: values_transformation, social_economical_metrics",
+    )
 
 @router.get("/get_provisions/{scenario_id}",
             summary="Get total provision values",
