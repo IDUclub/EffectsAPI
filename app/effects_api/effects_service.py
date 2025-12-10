@@ -21,7 +21,7 @@ from blocksnet.analysis.provision import competitive_provision, provision_strong
 from blocksnet.blocks.assignment import assign_objects
 from blocksnet.config import service_types_config
 from blocksnet.enums import LandUse
-from blocksnet.machine_learning.regression import DensityRegressor, SocialRegressor
+from blocksnet.machine_learning.regression import DensityRegressor
 from blocksnet.optimization.services import (
     AreaSolution,
     Facade,
@@ -774,7 +774,10 @@ class EffectsService:
             for c in ["site_area", "build_floor_area", "capacity", "count"]
             if c in solution_df.columns
         ]
-        zero_dict = {m: 0 for m in metrics}
+
+        if metrics:
+            non_zero_mask = (solution_df[metrics].fillna(0) != 0).any(axis=1)
+            solution_df = solution_df[non_zero_mask].copy()
 
         if len(metrics):
             agg = (
@@ -812,10 +815,18 @@ class EffectsService:
             if s not in wide.columns:
                 wide[s] = np.nan
 
-        def _fill_cell(x):
-            return x if isinstance(x, dict) else zero_dict.copy()
+        cells = (
+            agg.apply(_row_to_dict, axis=1)
+            if len(metrics)
+            else agg.apply(lambda _: {}, axis=1)
+        )
+        wide = cells.unstack("service_type").reindex(index=test_blocks.index)
 
-        wide = wide.applymap(_fill_cell)
+        all_services = sorted(solution_df["service_type"].dropna().unique().tolist())
+        for s in all_services:
+            if s not in wide.columns:
+                wide[s] = np.nan
+
         wide = wide[all_services]
         test_blocks_with_services: gpd.GeoDataFrame = test_blocks.join(wide, how="left")
 
@@ -1153,8 +1164,19 @@ class EffectsService:
             return float(v)
         return v
 
+    def _format_indicator_label(self, ind_info: dict[str, Any]) -> str:
+        """Build display label: 'name_full (unit)' if measurement_unit exists."""
+        name = (ind_info.get("name_full") or "").strip()
+        if not name:
+            name = (ind_info.get("name_short") or "").strip()
+
+        mu = ind_info.get("measurement_unit") or {}
+        unit = (mu.get("name") or "").strip()
+
+        return f"{name} ({unit})" if unit else name
+
     async def _load_indicator_name_cache(self) -> dict[int, str]:
-        """Load indicator_id -> name_full mapping once, based on INDICATORS_MAPPING."""
+        """Load indicator_id -> formatted label mapping once, based on INDICATORS_MAPPING."""
         if self._indicator_name_cache:
             return self._indicator_name_cache
 
@@ -1169,48 +1191,38 @@ class EffectsService:
                 try:
                     indicator_ids.add(int(v))
                 except (TypeError, ValueError):
-                    logger.warning(
-                        "Skipping invalid indicator id in INDICATORS_MAPPING: %r", v
-                    )
+                    logger.warning("Skipping invalid indicator id in INDICATORS_MAPPING: %r", v)
 
-            logger.info(f"Preloading indicator names for {len(indicator_ids)} indicators")
+            logger.info("Preloading indicator names for %s indicators", len(indicator_ids))
 
             id_to_name: dict[int, str] = {}
             for ind_id in sorted(indicator_ids):
                 try:
                     ind_info = await self.urban_api_client.get_indicator_info(ind_id)
-                    id_to_name[ind_id] = ind_info["name_full"]
+                    id_to_name[ind_id] = self._format_indicator_label(ind_info)
                 except Exception as exc:
-                    logger.warning(
-                        f"Failed to fetch indicator info for id={ind_id}: {exc}",
-                    )
+                    logger.warning("Failed to fetch indicator info for id=%s: %s", ind_id, exc)
 
             self._indicator_name_cache = id_to_name
-            logger.info(
-                f"Indicator name cache loaded: {len(self._indicator_name_cache)} entries"
-            )
+            logger.info("Indicator name cache loaded: %s entries", len(self._indicator_name_cache))
             return self._indicator_name_cache
 
     async def _load_urbanomy_indicator_name_cache(self) -> dict[int, str]:
-        """Load Urbanomy indicator_id -> name_full mapping once."""
+        """Load Urbanomy indicator_id -> formatted label mapping once."""
         async with self._urbanomy_indicator_name_cache_lock:
             if self._urbanomy_indicator_name_cache:
                 return self._urbanomy_indicator_name_cache
 
             indicator_ids = {int(v) for v in URBANOMY_INDICATORS_MAPPING.values() if v is not None}
-            logger.info(f"Preloading Urbanomy indicator names for {len(indicator_ids)} indicators")
+            logger.info("Preloading Urbanomy indicator names for %s indicators", len(indicator_ids))
 
             id_to_name: dict[int, str] = {}
             for ind_id in sorted(indicator_ids):
                 try:
                     ind_info = await self.urban_api_client.get_indicator_info(ind_id)
-                    id_to_name[ind_id] = ind_info["name_full"]
+                    id_to_name[ind_id] = self._format_indicator_label(ind_info)
                 except Exception as exc:
-                    logger.warning(
-                        "Failed to fetch Urbanomy indicator info for id=%s: %s",
-                        ind_id,
-                        exc,
-                    )
+                    logger.warning("Failed to fetch Urbanomy indicator info for id=%s: %s", ind_id, exc)
 
             self._urbanomy_indicator_name_cache = id_to_name
             logger.info(

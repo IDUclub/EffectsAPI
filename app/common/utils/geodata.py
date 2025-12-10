@@ -10,7 +10,6 @@ from shapely.wkt import dumps, loads
 
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.effects_api.constants.const import COL_RU, ROADS_ID, SPEED
-from app.effects_api.modules.scenario_service import SOURCES_PRIORITY
 
 
 async def gdf_to_ru_fc_rounded(gdf: gpd.GeoDataFrame, ndigits: int = 6) -> dict:
@@ -82,7 +81,7 @@ async def get_best_functional_zones_source(
     source: str | None = None,
     year: int | None = None,
 ) -> tuple[int | None, str | None]:
-
+    sources_priority = ["OSM", "PZZ", "User"]
     if source and year:
         row = sources_df.query("source == @source and year == @year")
         if not row.empty:
@@ -94,11 +93,11 @@ async def get_best_functional_zones_source(
             return int(rows["year"].max()), source
         return await get_best_functional_zones_source(sources_df, None, year)
     elif year and not source:
-        for s in SOURCES_PRIORITY:
+        for s in sources_priority:
             row = sources_df.query("source == @s and year == @year")
             if not row.empty:
                 return year, s
-    for s in SOURCES_PRIORITY:
+    for s in sources_priority:
         rows = sources_df.query("source == @s")
         if not rows.empty:
             return int(rows["year"].max()), s

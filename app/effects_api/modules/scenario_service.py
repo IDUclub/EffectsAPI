@@ -23,7 +23,6 @@ from app.effects_api.modules.functional_sources_service import adapt_functional_
 from app.effects_api.modules.service_type_service import adapt_service_types
 from app.effects_api.modules.services_service import adapt_services
 
-SOURCES_PRIORITY = ["PZZ", "OSM", "User"]
 
 
 def close_gaps(gdf, tolerance):  # taken from momepy
