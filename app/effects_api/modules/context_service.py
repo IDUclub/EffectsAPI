@@ -30,8 +30,6 @@ from app.effects_api.modules.service_type_service import (
 )
 from app.effects_api.modules.services_service import adapt_services
 
-_SOURCES_PRIORITY = ["PZZ", "OSM", "User"]
-
 
 class ContextService:
     """Context layer orchestration (blocks, buildings, services, fzones)."""
