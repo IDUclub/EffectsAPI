@@ -1804,7 +1804,8 @@ class EffectsService:
             cached = self.cache.load(method_name, project_id, phash)
             if cached:
                 logger.info(f"[Effects] cache hit for project {project_id}, parent={parent_id}")
-                results_all = self._sanitize_for_json(cached["results"])
+                data = cached.get("data", cached)
+                results_all = self._sanitize_for_json(data["results"])
                 return self._filter_by_territories(results_all, requested_ids)
         else:
             logger.info(f"[Effects] force=True, recalculating metrics for project {project_id}, parent={parent_id}")
