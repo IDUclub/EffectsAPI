@@ -123,7 +123,6 @@ async def create_task(
         params_for_hash = {
             "project_id": getattr(params, "project_id", None),
             "regional_scenario_id": getattr(params, "regional_scenario_id", None),
-            "territory_ids": getattr(params, "territory_ids", []) or [],
         }
 
         force = bool(getattr(params, "force", False))

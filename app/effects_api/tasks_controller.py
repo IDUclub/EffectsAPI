@@ -148,7 +148,7 @@ async def create_scenario_task(
              description=(
                  "Queues an asynchronous **project-level** task. Currently supported: "
                  "`social_economical_metrics`.\n\n"
-                 "**Hash parameters**: `{project_id, regional_scenario_id, territory_ids}`.\n"
+                 "**Hash parameters**: `{project_id, regional_scenario_id}` (territory_ids are not part of cache key).\n"
                  "**Caching behavior**: if `force=false` and a complete cached result exists, "
                  "for the computed parameter hash, the endpoint returns `status=done` immediately. "
                  "Otherwise a task is queued and `status=queued` is returned.\n\n"
