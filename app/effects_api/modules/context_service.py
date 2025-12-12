@@ -342,7 +342,7 @@ class ContextService:
         territory_id = (await self.client.get_all_project_info(project_id, token))[
             "territory"
         ]["id"]
-        base_sid = await self.client.get_base_scenario_id(project_id)
+        base_sid = await self.client.get_base_scenario_id(project_id, token)
         ctx_src, ctx_year = await self.client.get_optimal_func_zone_request_data(
             token=token, data_id=base_sid, source=None, year=None, project=False
         )

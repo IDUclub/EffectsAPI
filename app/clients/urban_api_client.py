@@ -373,9 +373,11 @@ class UrbanAPIClient:
             geom = json.dumps(geom)
         return shapely.from_geojson(geom)
 
-    async def get_base_scenario_id(self, project_id: int) -> int:
+    async def get_base_scenario_id(self, project_id: int, token: str) -> int:
+        headers =  {"Authorization": f"Bearer {token}"}
         scenarios = await self.json_handler.get(
-            f"/api/v1/projects/{project_id}/scenarios"
+            f"/api/v1/projects/{project_id}/scenarios",
+            headers=headers,
         )
 
         base = next((s for s in scenarios if s.get("is_based")), None)

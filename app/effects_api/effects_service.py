@@ -123,7 +123,7 @@ class EffectsService:
         project_id = (
             await self.urban_api_client.get_scenario_info(params.scenario_id, token)
         )["project"]["project_id"]
-        base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id)
+        base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id, token)
         base_src, base_year = (
             await self.urban_api_client.get_optimal_func_zone_request_data(
                 token, base_scenario_id, None, None
@@ -239,7 +239,7 @@ class EffectsService:
         info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
         updated_at = info["updated_at"]
         project_id = info["project"]["project_id"]
-        base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id)
+        base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id, token)
 
         params = await self.get_optimal_func_zone_data(params, token)
 
