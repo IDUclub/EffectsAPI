@@ -105,7 +105,7 @@ class ScenarioService:
             user_roads.geometry = close_gaps(user_roads, 1)
             roads = user_roads.explode(column="geometry")
         else:
-            roads = None
+            roads = gpd.GeoDataFrame(geometry=[], crs=boundaries.crs)
             water = None
 
         lines, polygons = preprocess_urban_objects(roads, None, water)
