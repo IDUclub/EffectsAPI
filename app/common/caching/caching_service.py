@@ -18,8 +18,20 @@ def _safe(s: str) -> str:
     return _FILENAME_RE.sub("", s)
 
 
-def _file_name(method: str, scenario_id: int, phash: str, day: str) -> Path:
-    name = f"{day}__scenario_{scenario_id}__{_safe(method)}__{phash}.json"
+PROJECT_BASED_METHODS: set[str] = {
+    "social_economical_metrics",
+    "urbanomy_metrics",
+}
+
+
+def _owner_prefix(method: str) -> str:
+    """Return cache key prefix based on method semantics."""
+    return "project" if method in PROJECT_BASED_METHODS else "scenario"
+
+
+def _file_name(method: str, owner_id: int, phash: str, day: str) -> Path:
+    prefix = _owner_prefix(method)
+    name = f"{day}__{prefix}_{owner_id}__{_safe(method)}__{phash}.json"
     return _CACHE_DIR / name
 
 
@@ -42,7 +54,7 @@ class FileCache:
     def save(
         self,
         method: str,
-        scenario_id: int,
+        owner_id: int,
         params: dict[str, Any],
         data: dict[str, Any],
         scenario_updated_at: str | None = None,
@@ -54,7 +66,7 @@ class FileCache:
         phash = self.params_hash(params)
         day = datetime.now().strftime("%Y%m%d")
 
-        path = _file_name(method, scenario_id, phash, day)
+        path = _file_name(method, owner_id, phash, day)
         to_save = {
             "meta": {
                 "timestamp": datetime.now().isoformat(),
@@ -66,25 +78,21 @@ class FileCache:
         path.write_text(json.dumps(to_save, ensure_ascii=False), encoding="utf-8")
         return path
 
-    def _latest_path(self, method: str, scenario_id: int) -> Path | None:
-        if method == "social_economical_metric":
-            pattern = f"*__project_{scenario_id}__{_safe(method)}__*.json"
-        else:
-            pattern = f"*__scenario_{scenario_id}__{_safe(method)}__*.json"
+    def _latest_path(self, method: str, owner_id: int) -> Path | None:
+        prefix = _owner_prefix(method)
+        pattern = f"*__{prefix}_{owner_id}__{_safe(method)}__*.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         return files[0] if files else None
 
     def load(
         self,
         method: str,
-        scenario_id: int,
+        owner_id: int,
         params_hash: str,
         max_age: timedelta | None = None,
     ) -> dict[str, Any] | None:
-        if method == "social_economical_metric":
-            pattern = f"*__project_{scenario_id}__{_safe(method)}__{params_hash}.json"
-        else:
-            pattern = f"*__scenario_{scenario_id}__{_safe(method)}__{params_hash}.json"
+        prefix = _owner_prefix(method)
+        pattern = f"*__{prefix}_{owner_id}__{_safe(method)}__{params_hash}.json"
         files = sorted(_CACHE_DIR.glob(pattern), reverse=True)
         if not files:
             return None
@@ -97,16 +105,20 @@ class FileCache:
 
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def load_latest(self, method: str, scenario_id: int) -> dict[str, Any] | None:
-        path = self._latest_path(method, scenario_id)
+    def load_latest(self, method: str, owner_id: int) -> dict[str, Any] | None:
+        path = self._latest_path(method, owner_id)
         if not path:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
     def has(
-        self, method: str, scenario_id: int, max_age: timedelta | None = None
+        self,
+        method: str,
+        owner_id: int,
+        params_hash: str,
+        max_age: timedelta | None = None,
     ) -> bool:
-        return self.load(method, scenario_id, max_age) is not None
+        return self.load(method, owner_id, params_hash, max_age=max_age) is not None
 
     def parse_task_id(self, task_id: str):
         parts = task_id.split("_")

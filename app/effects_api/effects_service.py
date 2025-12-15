@@ -1193,7 +1193,7 @@ class EffectsService:
                 except (TypeError, ValueError):
                     logger.warning("Skipping invalid indicator id in INDICATORS_MAPPING: %r", v)
 
-            logger.info("Preloading indicator names for %s indicators", len(indicator_ids))
+            logger.info(f"Preloading indicator names for {len(indicator_ids)} indicators")
 
             id_to_name: dict[int, str] = {}
             for ind_id in sorted(indicator_ids):
@@ -1201,10 +1201,10 @@ class EffectsService:
                     ind_info = await self.urban_api_client.get_indicator_info(ind_id)
                     id_to_name[ind_id] = self._format_indicator_label(ind_info)
                 except Exception as exc:
-                    logger.warning("Failed to fetch indicator info for id=%s: %s", ind_id, exc)
+                    logger.warning(f"Failed to fetch indicator info for id={ind_id}: {exc}")
 
             self._indicator_name_cache = id_to_name
-            logger.info("Indicator name cache loaded: %s entries", len(self._indicator_name_cache))
+            logger.info(f"Indicator name cache loaded: {len(self._indicator_name_cache)} entries")
             return self._indicator_name_cache
 
     async def _load_urbanomy_indicator_name_cache(self) -> dict[int, str]:
@@ -1214,7 +1214,7 @@ class EffectsService:
                 return self._urbanomy_indicator_name_cache
 
             indicator_ids = {int(v) for v in URBANOMY_INDICATORS_MAPPING.values() if v is not None}
-            logger.info("Preloading Urbanomy indicator names for %s indicators", len(indicator_ids))
+            logger.info(f"Preloading Urbanomy indicator names for {len(indicator_ids)} indicators")
 
             id_to_name: dict[int, str] = {}
             for ind_id in sorted(indicator_ids):
@@ -1222,12 +1222,11 @@ class EffectsService:
                     ind_info = await self.urban_api_client.get_indicator_info(ind_id)
                     id_to_name[ind_id] = self._format_indicator_label(ind_info)
                 except Exception as exc:
-                    logger.warning("Failed to fetch Urbanomy indicator info for id=%s: %s", ind_id, exc)
+                    logger.warning(f"Failed to fetch Urbanomy indicator info for id={ind_id}: {exc}")
 
             self._urbanomy_indicator_name_cache = id_to_name
             logger.info(
-                "Urbanomy indicator name cache loaded: %s entries",
-                len(self._urbanomy_indicator_name_cache),
+                f"Urbanomy indicator name cache loaded: {len(self._urbanomy_indicator_name_cache)} entries"
             )
             return self._urbanomy_indicator_name_cache
 
@@ -1255,9 +1254,7 @@ class EffectsService:
         before = len(df)
         df = df[df["indicator_name"].notna()].copy()
         logger.info(
-            "Attached Urbanomy indicator names for %s rows (filtered out %s rows without names)",
-            len(df),
-            before - len(df),
+            f"Attached Urbanomy indicator names for {len(df)} rows (filtered out {before - len(df)} rows without names)"
         )
         return df
 
@@ -1817,8 +1814,6 @@ class EffectsService:
         target = [s for s in scenarios if (s.get("parent_scenario") or {}).get("id") == parent_id]
         logger.info(f"[Effects] matched {len(target)} scenarios in project {project_id} (parent={parent_id})")
 
-        only_parent_ids = None
-
         results: dict[int, list[dict]] = {}
 
         only_parent_ids = None
@@ -1864,6 +1859,6 @@ class EffectsService:
             scenario_updated_at=updated_at,
         )
 
-        logger.success("[Effects] socio-economic metrics cached for project_id=%s, parent=%s", project_id, parent_id)
+        logger.success(f"[Effects] socio-economic metrics cached for project_id={project_id}, parent={parent_id}")
         return self._filter_by_territories(results_all, requested_ids)
 
