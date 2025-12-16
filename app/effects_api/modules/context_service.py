@@ -57,28 +57,32 @@ class ContextService:
         return gpd.GeoDataFrame(geometry=geometries, crs=4326)
 
     async def _get_context_roads(
-        self, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+            self, scenario_id: int, token: str
+    ) -> gpd.GeoDataFrame | None:
         """Return roads geometry for context cut (only geometry column)."""
         gdf = await self.client.get_physical_objects(
             scenario_id, token, physical_object_function_id=ROADS_ID
         )
+        if gdf is None:
+            return None
         return gdf[["geometry"]].reset_index(drop=True)
 
     async def _get_context_water(
-        self, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+            self, scenario_id: int, token: str
+    ) -> gpd.GeoDataFrame | None:
         """Return water geometry for context cut (only geometry column)."""
         gdf = await self.client.get_physical_objects(
             scenario_id, token=token, physical_object_function_id=WATER_ID
         )
+        if gdf is None:
+            return None
         return gdf[["geometry"]].reset_index(drop=True)
 
     async def _get_context_blocks(
-        self,
-        scenario_id: int,
-        boundaries: gpd.GeoDataFrame,
-        token: str,
+            self,
+            scenario_id: int,
+            boundaries: gpd.GeoDataFrame,
+            token: str,
     ) -> gpd.GeoDataFrame:
         """Construct context blocks by cutting boundaries with roads/water."""
         crs = boundaries.crs
@@ -89,9 +93,16 @@ class ContextService:
             self._get_context_roads(scenario_id, token),
         )
 
-        water = water.to_crs(crs)
-        roads = roads.to_crs(crs)
-        roads.geometry = close_gaps(roads, 1)
+        if water is not None and not water.empty:
+            water = water.to_crs(crs).explode().reset_index(drop=True)
+
+        if roads is not None and not roads.empty:
+            roads = roads.to_crs(crs).explode().reset_index(drop=True)
+            roads.geometry = close_gaps(roads, 1)
+            roads = roads.explode(column="geometry")
+        else:
+            roads = gpd.GeoDataFrame(geometry=[], crs=boundaries.crs)
+            water = None
 
         lines, polygons = preprocess_urban_objects(roads, None, water)
         blocks = cut_urban_blocks(boundaries, lines, polygons)
