@@ -412,6 +412,7 @@ class UrbanAPIClient:
         res = await self.json_handler.get(f"/api/v1/indicators/{indicator_id}")
         return res
 
-    async def get_indicator_scenario_value(self, scenario_id: int) -> dict:
-        res = await self.json_handler.get(f"/api/v1/scenarios/{scenario_id}/indicators_values")
+    async def get_indicator_scenario_value(self, scenario_id: int, token: str) -> dict:
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        res = await self.json_handler.get(f"/api/v1/scenarios/{scenario_id}/indicators_values", headers=headers)
         return res

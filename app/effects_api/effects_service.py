@@ -1317,7 +1317,7 @@ class EffectsService:
             return model
 
     async def _fetch_land_use_potentials(self, scenario_id: int, token: str) -> pd.DataFrame:
-        scenario_indicators = await self.urban_api_client.get_indicator_scenario_value(scenario_id)
+        scenario_indicators = await self.urban_api_client.get_indicator_scenario_value(scenario_id, token)
 
         indicator_attributes = {
             (item.get("indicator") or {}).get("name_full"): item.get("value")
