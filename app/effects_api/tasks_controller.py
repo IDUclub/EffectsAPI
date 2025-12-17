@@ -477,8 +477,15 @@ async def get_total_provisions(scenario_id: int):
     before_dict = data.get("before", {}) or {}
     after_dict = data.get("after", {}) or {}
 
-    provision_before = before_dict.get("provision_total_before")
-    provision_after = after_dict.get("provision_total_after")
+    provision_before = {
+        k: 0.0 if v is None else float(v)
+        for k, v in (before_dict.get("provision_total_before") or {}).items()
+    }
+
+    provision_after = {
+        k: 0.0 if v is None else float(v)
+        for k, v in (after_dict.get("provision_total_after") or {}).items()
+    }
 
     if provision_before and provision_after:
         return TerritoryTransformationResponseTablesSchema(
