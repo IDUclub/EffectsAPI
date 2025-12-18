@@ -100,11 +100,15 @@ class ContextService:
             roads = roads.to_crs(crs).explode().reset_index(drop=True)
             roads.geometry = close_gaps(roads, 1)
             roads = roads.explode(column="geometry")
+            water_geoms = ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString']
+            roads_geoms = ['LineString', 'MultiLineString']
+            water = water[water.geom_type.isin(water_geoms)].reset_index(drop=True)
+            roads = roads[roads.geom_type.isin(roads_geoms)].reset_index(drop=True)
         else:
             roads = gpd.GeoDataFrame(geometry=[], crs=boundaries.crs)
             water = None
 
-        lines, polygons = preprocess_urban_objects(roads, None, water)
+        lines, polygons = preprocess_urban_objects(roads, None, water.reset_index(drop=True))
         blocks = cut_urban_blocks(boundaries, lines, polygons)
         return blocks
 
