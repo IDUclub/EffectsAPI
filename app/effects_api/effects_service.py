@@ -1395,7 +1395,10 @@ class EffectsService:
         roads_gdf = await self.urban_api_client.get_physical_objects_scenario(
             scenario_id, token=token, physical_object_function_id=ROADS_ID
         )
-        roads_gdf = roads_gdf.to_crs(before_blocks.crs).overlay(before_blocks)
+        if roads_gdf is not None and not roads_gdf.empty:
+            roads_gdf = roads_gdf.to_crs(before_blocks.crs).overlay(before_blocks)
+        else:
+            roads_gdf = gpd.GeoDataFrame(geometry=[], crs=before_blocks.crs)
 
         try:
             acc_mx = get_accessibility_matrix(before_blocks)
@@ -1413,13 +1416,35 @@ class EffectsService:
 
         general = calculate_general_indicators(before_blocks)
         demo = calculate_demographic_indicators(before_blocks)
-        transp = calculate_transport_indicators(before_blocks, acc_mx, roads_gdf)
         eng = calculate_engineering_indicators(before_blocks)
         sc, sp = calculate_social_indicators(
             before_blocks, acc_mx, dist_mx, st_for_social
         )
 
-        indicators_df = pd.concat([general, demo, transp, eng, sc, sp])
+        frames = [general, demo, eng, sc, sp]
+
+        has_roads = (
+                roads_gdf is not None
+                and not roads_gdf.empty
+                and len(roads_gdf) > 1
+        )
+
+        if has_roads:
+            try:
+                transp = calculate_transport_indicators(
+                    before_blocks, acc_mx, roads_gdf
+                )
+                frames.append(transp)
+            except Exception as exc:
+                logger.warning(
+                    "Transport indicators skipped: %s", exc
+                )
+        else:
+            logger.info(
+                "Transport indicators skipped: roads_gdf is empty or insufficient"
+            )
+
+        indicators_df = pd.concat(frames)
 
         long_df = (
             indicators_df.reset_index()
@@ -1443,7 +1468,12 @@ class EffectsService:
 
         territory_id_hint: int | None = None
         if "is_project" in before_blocks.columns:
-            proj_mask = before_blocks["is_project"].fillna(False).astype(bool)
+            proj_mask = (
+                before_blocks["is_project"]
+                .infer_objects(copy=False)
+                .fillna(False)
+                .astype(bool)
+            )
             territory_id_hint = self._pick_single_territory_id(before_blocks.loc[proj_mask, "parent"])
 
         urbanomy_records: list[dict] = []
