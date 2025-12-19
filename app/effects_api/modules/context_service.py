@@ -95,14 +95,15 @@ class ContextService:
 
         if water is not None and not water.empty:
             water = water.to_crs(crs).explode().reset_index(drop=True)
+            water_geoms = ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString']
+            water = water[water.geom_type.isin(water_geoms)].reset_index(drop=True)
 
         if roads is not None and not roads.empty:
             roads = roads.to_crs(crs).explode().reset_index(drop=True)
             roads.geometry = close_gaps(roads, 1)
             roads = roads.explode(column="geometry")
-            water_geoms = ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString']
             roads_geoms = ['LineString', 'MultiLineString']
-            water = water[water.geom_type.isin(water_geoms)].reset_index(drop=True)
+
             roads = roads[roads.geom_type.isin(roads_geoms)].reset_index(drop=True)
         else:
             roads = gpd.GeoDataFrame(geometry=[], crs=boundaries.crs)
