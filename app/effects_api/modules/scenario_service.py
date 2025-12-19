@@ -104,6 +104,11 @@ class ScenarioService:
         if user_roads is not None and not user_roads.empty:
             user_roads.geometry = close_gaps(user_roads, 1)
             roads = user_roads.explode(column="geometry")
+            water_geoms = ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString']
+            roads_geoms = ['LineString', 'MultiLineString']
+            water = water[water.geom_type.isin(water_geoms)].reset_index(drop=True)
+            roads = roads[roads.geom_type.isin(roads_geoms)].reset_index(drop=True)
+
         else:
             roads = gpd.GeoDataFrame(geometry=[], crs=boundaries.crs)
             water = None
