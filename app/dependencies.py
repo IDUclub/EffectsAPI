@@ -4,7 +4,11 @@ from pathlib import Path
 from iduconfig import Config
 from loguru import logger
 
-from app.broker_handlers.project_created_handler import ScenarioObjectsUpdatedHandler
+from app.broker_handlers.cache_invalidation import CacheInvalidationService
+from app.broker_handlers.scenario_updated_handler import (
+    ScenarioObjectsUpdatedHandler,
+    ScenarioZonesUpdatedHandler,
+)
 from app.clients.urban_api_client import UrbanAPIClient
 from app.common.api_handlers.json_api_handler import JSONAPIHandler
 from app.common.caching.caching_service import FileCache
@@ -41,6 +45,11 @@ effects_service = EffectsService(
 consumer = ConsumerWrapper()
 producer = ProducerWrapper()
 
+invalidation_service = CacheInvalidationService(file_cache)
+
 consumer.register_handler(
-    ScenarioObjectsUpdatedHandler(effects_service, producer.producer_service, urban_api_client, config)
+    ScenarioObjectsUpdatedHandler(file_cache, producer.producer_service)
+)
+consumer.register_handler(
+    ScenarioZonesUpdatedHandler(file_cache, producer.producer_service)
 )
