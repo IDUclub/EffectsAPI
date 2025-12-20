@@ -26,7 +26,9 @@ def _cache_complete(method: str, cached_obj: dict | None) -> bool:
         return False
     data = cached_obj.get("data") or {}
     if method == "territory_transformation":
-        return bool(data.get("after"))
+        if data.get("after"):
+            return True
+        return bool(data.get("before"))
     return True
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()
