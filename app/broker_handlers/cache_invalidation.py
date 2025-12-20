@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
@@ -68,7 +69,11 @@ class CacheInvalidationMixin:
             f"scenario_id={getattr(event, 'scenario_id', None)}"
         )
 
-        total_deleted = self._invalidation_service.invalidate(event, self._rules)
+        total_deleted = await asyncio.to_thread(
+            self._invalidation_service.invalidate,
+            event,
+            self._rules,
+        )
         logger.info(f"Cache invalidation completed: deleted_files={total_deleted}")
 
         return None
