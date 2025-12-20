@@ -243,9 +243,11 @@ worker = Worker()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     worker.start()
-    await consumer.start(["scenario.events"])
     await producer.start()
+    await consumer.start(["scenario.events"])
     try:
         yield
     finally:
+        await consumer.stop()
+        await producer.stop()
         await worker.stop()

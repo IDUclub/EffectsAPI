@@ -5,6 +5,10 @@ class ProducerWrapper:
     def __init__(self):
         self.producer_settings = KafkaProducerSettings.from_env()
         self.producer_service = KafkaProducerClient(self.producer_settings)
-    
+
     async def start(self):
         await self.producer_service.start()
+
+    async def stop(self) -> None:
+        """Gracefully stop producer service (flush + stop polling thread)."""
+        await self.producer_service.close()

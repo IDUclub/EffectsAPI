@@ -45,11 +45,11 @@ effects_service = EffectsService(
 consumer = ConsumerWrapper()
 producer = ProducerWrapper()
 
-invalidation_service = CacheInvalidationService(file_cache)
+cache_invalidator = CacheInvalidationService(file_cache)
 
 consumer.register_handler(
-    ScenarioObjectsUpdatedHandler(file_cache, producer.producer_service)
+    ScenarioObjectsUpdatedHandler(cache_invalidator, producer.producer_service)
 )
 consumer.register_handler(
-    ScenarioZonesUpdatedHandler(file_cache, producer.producer_service)
+    ScenarioZonesUpdatedHandler(cache_invalidator, producer.producer_service)
 )

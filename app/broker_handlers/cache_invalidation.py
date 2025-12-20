@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Iterable, TypeVar
+from typing import Any, Callable, Iterable
 
 from confluent_kafka import Message
 from loguru import logger
-from otteroad import BaseMessageHandler, KafkaProducerClient
-from otteroad.consumer.handlers.base import EventT
+from otteroad import KafkaProducerClient
 
 from app.common.caching.caching_service import FileCache
-
-TEvent = TypeVar("TEvent")
 
 
 @dataclass(frozen=True)
 class CacheInvalidationRule:
     """
-    Describes what cache to invalidate and how to extract owner_id from an event.
+    Cache invalidation rule.
 
     method: cache method name (e.g. "social_economical_metrics").
     owner_id_getter: function that returns owner_id from event (e.g. project_id or scenario_id).
@@ -27,7 +24,6 @@ class CacheInvalidationRule:
 
 class CacheInvalidationService:
     """Applies cache invalidation rules using FileCache."""
-
     def __init__(self, cache: FileCache) -> None:
         self._cache = cache
 
@@ -51,9 +47,10 @@ class CacheInvalidationService:
         return total_deleted
 
 
-class BaseCacheInvalidationHandler(Generic[TEvent], BaseMessageHandler[TEvent]):
-    """Base handler for cache invalidation with easy extension via rules."""
-
+class CacheInvalidationMixin:
+    """
+    Shared handler logic for cache invalidation.
+    """
     def __init__(
         self,
         invalidation_service: CacheInvalidationService,
@@ -63,16 +60,15 @@ class BaseCacheInvalidationHandler(Generic[TEvent], BaseMessageHandler[TEvent]):
         self._invalidation_service = invalidation_service
         self._producer = producer
         self._rules = rules
-        super().__init__()
 
-    async def on_startup(self):
-        pass
-
-    async def on_shutdown(self):
-        pass
-
-    async def handle(self, event: EventT, ctx: Message = None):
+    async def _handle_cache_invalidation(self, event: Any, ctx: Message | None = None) -> None:
         logger.info(f"Received event: type={type(event)}")
+        logger.info(
+            f"Invalidate cache for project_id={getattr(event, 'project_id', None)} "
+            f"scenario_id={getattr(event, 'scenario_id', None)}"
+        )
+
         total_deleted = self._invalidation_service.invalidate(event, self._rules)
         logger.info(f"Cache invalidation completed: deleted_files={total_deleted}")
-        return await self._producer.send(event)
+
+        return None
