@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import json
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Coroutine
 
 import geopandas as gpd
 from fastapi import FastAPI
@@ -11,7 +11,7 @@ from loguru import logger
 from app.common.exceptions.http_exception_wrapper import http_exception
 from app.dependencies import effects_service, file_cache, effects_utils, consumer, producer
 
-MethodFunc = Callable[[str, Any], "dict[str, Any]"]
+MethodFunc = Callable[[str, Any], Coroutine[Any, Any, Any]]
 
 TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
@@ -65,14 +65,18 @@ class AnyTask:
             return {"status": "done", "result": self.result}
         return {"status": "failed", "error": self.error}
 
-    def run_sync(self) -> None:
+    async def run(self) -> None:
+        """
+        Run task asynchronously inside event loop.
+        """
         try:
             logger.info(f"[{self.task_id}] started")
             self.status = "running"
 
             force = getattr(self.params, "force", False)
-
-            cached = None if force else self.cache.load(self.method, self.scenario_id, self.param_hash)
+            cached = None if force else self.cache.load(
+                self.method, self.scenario_id, self.param_hash
+            )
 
             if not force and _cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
@@ -81,28 +85,30 @@ class AnyTask:
                 return
 
             func = TASK_METHODS[self.method]
-            raw_data = asyncio.run(func(self.token, self.params))
+            raw_data = await func(self.token, self.params)
 
-            def gdf_to_dict(gdf: gpd.GeoDataFrame) -> dict:
-                return json.loads(gdf.to_json(drop_id=True))
-
-            if isinstance(raw_data, gpd.GeoDataFrame):
-                data_to_cache = gdf_to_dict(raw_data)
-            elif isinstance(raw_data, dict):
-                data_to_cache = {
-                    k: gdf_to_dict(v) if isinstance(v, gpd.GeoDataFrame) else v
-                    for k, v in raw_data.items()
-                }
-            else:
-                data_to_cache = raw_data
-
-            self.result = data_to_cache
+            self.result = self._serialize_result(raw_data)
             self.status = "done"
 
         except Exception as exc:
             logger.exception(exc)
             self.status = "failed"
             self.error = str(exc)
+
+    def _serialize_result(self, raw_data):
+        """Serialize GeoDataFrame or dict to json-compatible structure."""
+        if isinstance(raw_data, gpd.GeoDataFrame):
+            return json.loads(raw_data.to_json(drop_id=True))
+
+        if isinstance(raw_data, dict):
+            return {
+                k: json.loads(v.to_json(drop_id=True))
+                if isinstance(v, gpd.GeoDataFrame)
+                else v
+                for k, v in raw_data.items()
+            }
+
+        return raw_data
 
 
 async def create_task(
@@ -226,7 +232,7 @@ class Worker:
     async def run(self):
         while self.is_alive:
             task: AnyTask = await _task_queue.get()
-            await asyncio.to_thread(task.run_sync)
+            await task.run()
             _task_queue.task_done()
 
     def start(self):
