@@ -7,6 +7,7 @@ class ProducerWrapper:
         self.producer_service = KafkaProducerClient(self.producer_settings, init_loop=False)
 
     async def start(self):
+        self.producer_service.init_loop()
         await self.producer_service.start()
 
     async def stop(self) -> None:
