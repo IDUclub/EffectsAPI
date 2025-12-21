@@ -328,10 +328,8 @@ class EffectsService:
         updated_at = info["updated_at"]
         is_based = bool(info.get("is_based"))
         project_id = info["project"]["project_id"]
-
-        base_scenario_id = await self.urban_api_client.get_base_scenario_id(
-            project_id, token
-        )
+        base_id_response = await self.urban_api_client.get_all_project_info(project_id, token)
+        base_scenario_id = base_id_response["base_scenario"]["id"]
 
         params = await self.get_optimal_func_zone_data(params, token)
         params_for_hash = await self.build_hash_params(params, token)
@@ -399,7 +397,6 @@ class EffectsService:
         }
         existing_data["before"]["provision_total_before"] = prov_totals_before
 
-        # AFTER: requested scenario + shared context (only for non-base scenarios)
         prov_gdfs_after: dict[str, gpd.GeoDataFrame] = {}
         prov_totals_after: dict[str, float | None] = {}
 
