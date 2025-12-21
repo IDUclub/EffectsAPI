@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.dependencies import effects_service, file_cache, effects_utils
+from app.dependencies import effects_service, file_cache, effects_utils, consumer, producer
 
 MethodFunc = Callable[[str, Any], "dict[str, Any]"]
 
@@ -242,11 +242,14 @@ class Worker:
 
 worker = Worker()
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     worker.start()
+    await producer.start()
+    await consumer.start(["scenario.events"])
     try:
         yield
     finally:
+        await consumer.stop()
+        await producer.stop()
         await worker.stop()
