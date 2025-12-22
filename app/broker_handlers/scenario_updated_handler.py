@@ -15,6 +15,7 @@ from app.broker_handlers.cache_invalidation import (
 
 _SOCIAL_RULES = [
     CacheInvalidationRule(method="social_economical_metrics", owner_id_getter=lambda e: e.project_id),
+    CacheInvalidationRule(method="territory_transformation", owner_id_getter=lambda e: e.scenario_id)
 ]
 
 
