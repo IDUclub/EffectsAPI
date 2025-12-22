@@ -353,7 +353,7 @@ class ContextService:
             )
             return ctx_blocks, ctx_territories, service_types
 
-        logger.info("Shared context cache miss for project_id={project_id} — building")
+        logger.info(f"Shared context cache miss for project_id={project_id} — is building")
 
         territory_id = (await self.client.get_all_project_info(project_id, token))[
             "territory"

@@ -694,13 +694,12 @@ class EffectsService:
             are computed inside `territory_transformation_scenario_before`. The 'after' section
             is omitted for base scenarios.
         """
+        project_id = (
+            await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+        )["project"]["project_id"]
 
-        context_blocks, _ = await self.context.aggregate_blocks_layer_context(
-            params.scenario_id,
-            params.context_func_zone_source,
-            params.context_func_source_year,
-            token,
-        )
+        context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id,
+                                                                                                       token)
 
         return await self.territory_transformation_scenario_before(
             token, params, context_blocks
