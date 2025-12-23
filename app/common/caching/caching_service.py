@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import geopandas as gpd
 import pandas as pd
+from loguru import logger
 
 _CACHE_DIR = Path().absolute() / "__effects_cache__"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -213,3 +214,33 @@ class FileCache:
         elif ext == ".pkl":
             return pd.read_pickle(path)
         raise ValueError(f"Unsupported artifact extension: {ext}")
+
+    def delete_all(self, method: str, owner_id: int) -> int:
+        """
+        Delete all cached JSON files and heavy artifacts for given method and owner_id.
+
+        Returns:
+            Number of deleted files.
+        """
+        prefix = _owner_prefix(method)
+
+        json_pattern = f"*__{prefix}_{owner_id}__{_safe(method)}__*.json"
+        json_files = list(_CACHE_DIR.glob(json_pattern))
+
+        artifact_pattern = f"artifact__{_safe(method)}__{owner_id}__*"
+        artifact_files = list(_CACHE_DIR.glob(artifact_pattern))
+
+        deleted = 0
+        for path in json_files + artifact_files:
+            try:
+                path.unlink(missing_ok=True)
+                deleted += 1
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete cache file: path={path.as_posix()} err={e}"
+                )
+
+        logger.info(
+            f"Cache invalidated: method={method} owner_id={owner_id} deleted_files={deleted}"
+        )
+        return deleted
