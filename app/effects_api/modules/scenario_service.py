@@ -159,7 +159,7 @@ class ScenarioService:
                 scenario_id,
                 token,
                 physical_object_type_id=LIVING_BUILDINGS_ID,
-                centers_only=True,
+                centers_only=False,
             )
             if gdf is None:
                 return None

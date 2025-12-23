@@ -227,11 +227,8 @@ class FileCache:
         json_pattern = f"*__{prefix}_{owner_id}__{_safe(method)}__*.json"
         json_files = list(_CACHE_DIR.glob(json_pattern))
 
-        artifact_pattern = f"artifact__{_safe(method)}__{owner_id}__*"
-        artifact_files = list(_CACHE_DIR.glob(artifact_pattern))
-
         deleted = 0
-        for path in json_files + artifact_files:
+        for path in json_files:
             try:
                 path.unlink(missing_ok=True)
                 deleted += 1

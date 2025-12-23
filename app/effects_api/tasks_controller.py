@@ -66,7 +66,11 @@ def _cache_complete(method: str, cached: dict | None) -> bool:
         return False
     data = cached.get("data") or {}
     if method == "territory_transformation":
-        return _section_ready(data.get("before")) and _section_ready(data.get("after"))
+        before_ok = _section_ready(data.get("before"))
+        after_sec = data.get("after")
+        if after_sec:
+            return before_ok and _section_ready(after_sec)
+        return before_ok
     return True
 
 
