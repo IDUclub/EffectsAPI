@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 from app.common.exceptions.exception_handler import ExceptionHandlerMiddleware
 from app.effects_api.modules.task_service import lifespan
 from app.effects_api.tasks_controller import router as tasks_router
+from app.prometheus.server import start_metrics_server
 from app.system_router.system_controller import system_router
 
 # TODO add app version
@@ -33,5 +34,6 @@ async def read_root():
     return RedirectResponse("/docs")
 
 
+start_metrics_server(port=8001)
 app.include_router(tasks_router)
 app.include_router(system_router)

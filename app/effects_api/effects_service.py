@@ -2,6 +2,7 @@ import asyncio
 import json
 import math
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, Literal
 
@@ -79,6 +80,8 @@ from .dto.socio_economic_project_dto import (
 )
 from .dto.transformation_effects_dto import TerritoryTransformationDTO
 from .modules.context_service import ContextService
+from ..prometheus.metrics import EFFECTS_TERRITORY_TRANSFORMATION_TOTAL, EFFECTS_TERRITORY_TRANSFORMATION_ERROR_TOTAL, \
+    EFFECTS_TERRITORY_TRANSFORMATION_DURATION_SECONDS
 
 
 class EffectsService:
@@ -698,12 +701,25 @@ class EffectsService:
             await self.urban_api_client.get_scenario_info(params.scenario_id, token)
         )["project"]["project_id"]
 
-        context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id,
-                                                                                                       token)
-
-        return await self.territory_transformation_scenario_before(
-            token, params, context_blocks
+        # context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id,
+        #                                                                                                token)
+        context_blocks, _ = await self.context.aggregate_blocks_layer_context(
+            params.scenario_id,
+            params.context_func_zone_source,
+            params.context_func_source_year,
+            token,
         )
+        EFFECTS_TERRITORY_TRANSFORMATION_TOTAL.inc()
+        start_time = time.perf_counter()
+        try:
+            return await self.territory_transformation_scenario_before(token, params, context_blocks)
+        except Exception:
+            EFFECTS_TERRITORY_TRANSFORMATION_ERROR_TOTAL.inc()
+            raise
+        finally:
+            EFFECTS_TERRITORY_TRANSFORMATION_DURATION_SECONDS.observe(
+                time.perf_counter() - start_time
+            )
 
     async def values_transformation(
         self,
