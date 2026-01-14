@@ -9,7 +9,21 @@ from fastapi import FastAPI
 from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.dependencies import effects_service, file_cache, effects_utils, consumer, producer
+from app.dependencies import effects_service, file_cache, effects_utils, consumer, producer, config
+from app.prometheus.server import start_metrics_server, stop_metrics_server
+import time
+
+from app.prometheus.metrics import (
+    EFFECTS_TASKS_CREATED_TOTAL,
+    EFFECTS_TASKS_CACHE_HIT_TOTAL,
+    EFFECTS_TASKS_ENQUEUED_TOTAL,
+    EFFECTS_TASKS_STARTED_TOTAL,
+    EFFECTS_TASKS_DONE_TOTAL,
+    EFFECTS_TASKS_FAILED_TOTAL,
+    EFFECTS_TASK_DURATION_SECONDS,
+    EFFECTS_TASKS_QUEUE_SIZE,
+    EFFECTS_TASKS_RUNNING,
+)
 
 MethodFunc = Callable[[str, Any], Coroutine[Any, Any, Any]]
 
@@ -69,17 +83,20 @@ class AnyTask:
         """
         Run task asynchronously inside event loop.
         """
+        start_time = time.perf_counter()
+        EFFECTS_TASKS_STARTED_TOTAL.labels(method=self.method).inc()
+        EFFECTS_TASKS_RUNNING.inc()
+
         try:
             logger.info(f"[{self.task_id}] started")
             self.status = "running"
 
             force = getattr(self.params, "force", False)
-            cached = None if force else self.cache.load(
-                self.method, self.scenario_id, self.param_hash
-            )
+            cached = None if force else self.cache.load(self.method, self.scenario_id, self.param_hash)
 
             if not force and _cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
+                EFFECTS_TASKS_CACHE_HIT_TOTAL.labels(method=self.method).inc()
                 self.result = cached["data"]
                 self.status = "done"
                 return
@@ -89,11 +106,20 @@ class AnyTask:
 
             self.result = self._serialize_result(raw_data)
             self.status = "done"
+            EFFECTS_TASKS_DONE_TOTAL.labels(method=self.method).inc()
 
         except Exception as exc:
             logger.exception(exc)
             self.status = "failed"
             self.error = str(exc)
+            EFFECTS_TASKS_FAILED_TOTAL.labels(method=self.method).inc()
+
+        finally:
+            EFFECTS_TASK_DURATION_SECONDS.labels(method=self.method).observe(
+                time.perf_counter() - start_time
+            )
+            EFFECTS_TASKS_RUNNING.dec()
+            EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize())
 
     def _serialize_result(self, raw_data):
         """Serialize GeoDataFrame or dict to json-compatible structure."""
@@ -122,6 +148,7 @@ async def create_task(
     Returns:
         dict: { "task_id": str, "status": "queued" | "running" | "done" }
     """
+    EFFECTS_TASKS_CREATED_TOTAL.labels(method=method).inc()
 
     project_based_methods = {"social_economical_metrics", "urbanomy_metrics"}
 
@@ -160,6 +187,8 @@ async def create_task(
 
         task = AnyTask(method, owner_id, token, params, phash, file_cache, task_id)
         _task_map[task_id] = task
+        EFFECTS_TASKS_ENQUEUED_TOTAL.labels(method=method).inc()
+        EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize() + 1)
         await _task_queue.put(task)
         return {"task_id": task_id, "status": "queued"}
 
@@ -193,6 +222,8 @@ async def create_task(
         if task.task_id in _task_map:
             return {"task_id": task.task_id, "status": "running"}
         _task_map[task.task_id] = task
+        EFFECTS_TASKS_ENQUEUED_TOTAL.labels(method=method).inc()
+        EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize() + 1)
         await _task_queue.put(task)
         return {"task_id": task.task_id, "status": "queued"}
 
@@ -210,6 +241,8 @@ async def create_task(
     if task.task_id in _task_map:
         return {"task_id": task.task_id, "status": "running"}
     _task_map[task.task_id] = task
+    EFFECTS_TASKS_ENQUEUED_TOTAL.labels(method=method).inc()
+    EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize() + 1)
     await _task_queue.put(task)
     return {"task_id": task.task_id, "status": "queued"}
 
@@ -250,6 +283,8 @@ worker = Worker()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    start_metrics_server(int(config.get("PROMETHEUS_PORT")))
+
     worker.start()
     await producer.start()
     await consumer.start(["scenario.events"])
@@ -259,3 +294,4 @@ async def lifespan(app: FastAPI):
         await consumer.stop()
         await producer.stop()
         await worker.stop()
+        stop_metrics_server()
