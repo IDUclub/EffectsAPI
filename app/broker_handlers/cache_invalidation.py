@@ -7,6 +7,10 @@ from typing import Any, Callable, Iterable
 from confluent_kafka import Message
 from loguru import logger
 from otteroad import KafkaProducerClient
+import time
+
+from app.prometheus.metrics import CACHE_INVALIDATION_EVENTS_TOTAL, CACHE_INVALIDATION_ERROR_TOTAL, \
+    CACHE_INVALIDATION_DURATION_SECONDS, CACHE_INVALIDATION_SUCCESS_TOTAL
 
 from app.common.caching.caching_service import FileCache
 
@@ -63,17 +67,23 @@ class CacheInvalidationMixin:
         self._rules = rules
 
     async def _handle_cache_invalidation(self, event: Any, ctx: Message | None = None) -> None:
+        CACHE_INVALIDATION_EVENTS_TOTAL.inc()
+        start_time = time.perf_counter()
+
         logger.info(f"Received event: type={type(event)}")
         logger.info(
             f"Invalidate cache for project_id={getattr(event, 'project_id', None)} "
             f"scenario_id={getattr(event, 'scenario_id', None)}"
         )
-
         total_deleted = await asyncio.to_thread(
             self._invalidation_service.invalidate,
             event,
             self._rules,
         )
-        logger.info(f"Cache invalidation completed: deleted_files={total_deleted}")
+        CACHE_INVALIDATION_SUCCESS_TOTAL.inc()
 
+        logger.info(f"Cache invalidation completed: deleted_files={total_deleted}")
+        duration = time.perf_counter() - start_time
+        CACHE_INVALIDATION_DURATION_SECONDS.observe(duration)
         return None
+

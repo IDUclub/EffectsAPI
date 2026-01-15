@@ -328,13 +328,16 @@ class ContextService:
         return list(context_blocks.index)
 
     async def get_shared_context(
-        self,
-        project_id: int,
-        token: str,
+            self,
+            project_id: int,
+            token: str,
     ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, pd.DataFrame]:
         """
-        Get cached context (blocks, territories, service_types) by project_id,
-        or build and cache if missing. JSON cache stores only paths to artifacts.
+        Get cached context (blocks, territories, service_types: artifacts) by project_id,
+        or build and cache if missing/corrupted.
+
+        JSON cache stores only paths to artifacts. If any artifact file is missing,
+        the cache is treated as stale and context is recomputed.
         """
         method = "shared_context"
         params = {"project_id": int(project_id)}
@@ -344,20 +347,25 @@ class ContextService:
         if cached:
             logger.info(f"Shared context cache hit for project_id={project_id}")
             data = cached["data"]
-            ctx_blocks = self.cache.load_gdf_artifact(Path(data["context_blocks_path"]))
-            ctx_territories = self.cache.load_gdf_artifact(
-                Path(data["context_territories_path"])
-            )
-            service_types = self.cache.load_df_artifact(
-                Path(data["service_types_path"])
-            )
-            return ctx_blocks, ctx_territories, service_types
+
+            try:
+                ctx_blocks = self.cache.load_gdf_artifact(Path(data["context_blocks_path"]))
+                ctx_territories = self.cache.load_gdf_artifact(Path(data["context_territories_path"]))
+                service_types = self.cache.load_df_artifact(Path(data["service_types_path"]))
+                return ctx_blocks, ctx_territories, service_types
+
+            except (FileNotFoundError, OSError, KeyError) as exc:
+                # KeyError — если в JSON вдруг нет нужного ключа
+                logger.warning(
+                    f"Shared context cache is corrupted/stale for project_id={project_id}. "
+                    f"Rebuilding. Reason: {exc}"
+                )
+                # optional: если у тебя есть метод точечной инвалидции:
+                # self.cache.invalidate(method, project_id, phash)
 
         logger.info(f"Shared context cache miss for project_id={project_id} — is building")
 
-        territory_id = (await self.client.get_all_project_info(project_id, token))[
-            "territory"
-        ]["id"]
+        territory_id = (await self.client.get_all_project_info(project_id, token))["territory"]["id"]
         base_sid = await self.client.get_base_scenario_id(project_id, token)
         ctx_src, ctx_year = await self.client.get_optimal_func_zone_request_data(
             token=token, data_id=base_sid, source=None, year=None, project=False
@@ -374,16 +382,12 @@ class ContextService:
 
         service_types = await self.client.get_service_types()
         service_types = await adapt_service_types(service_types, self.client)
-        service_types = service_types[
-            service_types["infrastructure_type"].notna()
-        ].copy()
+        service_types = service_types[service_types["infrastructure_type"].notna()].copy()
         service_types = adapt_social_service_types_df(
             service_types, SOCIAL_INDICATORS_MAPPING
         ).join(normatives)
 
-        ctx_blocks, _ = await self.aggregate_blocks_layer_context(
-            base_sid, ctx_src, ctx_year, token
-        )
+        ctx_blocks, _ = await self.aggregate_blocks_layer_context(base_sid, ctx_src, ctx_year, token)
         ctx_territories = await self.get_context_territories(project_id, token)
 
         ctx_blocks_path = self.cache.save_gdf_artifact(
