@@ -14,18 +14,10 @@ from app.prometheus.server import start_metrics_server, stop_metrics_server
 import time
 
 from app.prometheus.metrics import (
-    EFFECTS_TASKS_CREATED_TOTAL,
-    EFFECTS_TASKS_CACHE_HIT_TOTAL,
-    EFFECTS_TASKS_ENQUEUED_TOTAL,
-    EFFECTS_TASKS_STARTED_TOTAL,
-    EFFECTS_TASKS_DONE_TOTAL,
-    EFFECTS_TASKS_FAILED_TOTAL,
-    EFFECTS_TASK_DURATION_SECONDS,
-    EFFECTS_TASKS_QUEUE_SIZE,
-    EFFECTS_TASKS_RUNNING,
-)
+    bind_queue_metrics, get_task_metrics)
 
 MethodFunc = Callable[[str, Any], Coroutine[Any, Any, Any]]
+TASK_METRICS = get_task_metrics()
 
 TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
@@ -84,8 +76,7 @@ class AnyTask:
         Run task asynchronously inside event loop.
         """
         start_time = time.perf_counter()
-        EFFECTS_TASKS_STARTED_TOTAL.labels(method=self.method).inc()
-        EFFECTS_TASKS_RUNNING.inc()
+        TASK_METRICS.on_started(self.method)
 
         try:
             logger.info(f"[{self.task_id}] started")
@@ -96,7 +87,7 @@ class AnyTask:
 
             if not force and _cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
-                EFFECTS_TASKS_CACHE_HIT_TOTAL.labels(method=self.method).inc()
+                TASK_METRICS.on_cache_hit(self.method)
                 self.result = cached["data"]
                 self.status = "done"
                 return
@@ -106,20 +97,17 @@ class AnyTask:
 
             self.result = self._serialize_result(raw_data)
             self.status = "done"
-            EFFECTS_TASKS_DONE_TOTAL.labels(method=self.method).inc()
+            TASK_METRICS.on_finished_success(self.method)
+
 
         except Exception as exc:
-            logger.exception(exc)
+            logger.exception(f"[{self.task_id}] failed")
             self.status = "failed"
             self.error = str(exc)
-            EFFECTS_TASKS_FAILED_TOTAL.labels(method=self.method).inc()
+            TASK_METRICS.on_finished_failed(self.method)
 
         finally:
-            EFFECTS_TASK_DURATION_SECONDS.labels(method=self.method).observe(
-                time.perf_counter() - start_time
-            )
-            EFFECTS_TASKS_RUNNING.dec()
-            EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize())
+            TASK_METRICS.observe_duration(self.method, time.perf_counter() - start_time)
 
     def _serialize_result(self, raw_data):
         """Serialize GeoDataFrame or dict to json-compatible structure."""
@@ -148,7 +136,7 @@ async def create_task(
     Returns:
         dict: { "task_id": str, "status": "queued" | "running" | "done" }
     """
-    EFFECTS_TASKS_CREATED_TOTAL.labels(method=method).inc()
+    TASK_METRICS.on_created(method)
 
     project_based_methods = {"social_economical_metrics", "urbanomy_metrics"}
 
@@ -179,6 +167,7 @@ async def create_task(
                                  _input={"method": method, "owner_id": owner_id}, _detail=str(e))
 
         if not force and _cache_complete(method, cached):
+            TASK_METRICS.on_cache_hit(method)
             return {"task_id": task_id, "status": "done"}
 
         existing = None if force else _task_map.get(task_id)
@@ -187,8 +176,7 @@ async def create_task(
 
         task = AnyTask(method, owner_id, token, params, phash, file_cache, task_id)
         _task_map[task_id] = task
-        EFFECTS_TASKS_ENQUEUED_TOTAL.labels(method=method).inc()
-        EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize() + 1)
+        TASK_METRICS.on_enqueued(method)
         await _task_queue.put(task)
         return {"task_id": task_id, "status": "queued"}
 
@@ -216,14 +204,14 @@ async def create_task(
         cached = file_cache.load(method, owner_id, phash)
         if cached and "data" in cached and "result" in cached["data"]:
             logger.info("[Tasks] Cache hit for values_oriented_requirements -> DONE")
+            TASK_METRICS.on_cache_hit(method)
             return {"task_id": task_id, "status": "done"}
 
         task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
         if task.task_id in _task_map:
             return {"task_id": task.task_id, "status": "running"}
         _task_map[task.task_id] = task
-        EFFECTS_TASKS_ENQUEUED_TOTAL.labels(method=method).inc()
-        EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize() + 1)
+        TASK_METRICS.on_enqueued(method)
         await _task_queue.put(task)
         return {"task_id": task.task_id, "status": "queued"}
 
@@ -235,14 +223,14 @@ async def create_task(
 
     cached = file_cache.load(method, owner_id, phash)
     if cached and "data" in cached:
+        TASK_METRICS.on_cache_hit(method)
         return {"task_id": task_id, "status": "done"}
 
     task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
     if task.task_id in _task_map:
         return {"task_id": task.task_id, "status": "running"}
     _task_map[task.task_id] = task
-    EFFECTS_TASKS_ENQUEUED_TOTAL.labels(method=method).inc()
-    EFFECTS_TASKS_QUEUE_SIZE.set(_task_queue.qsize() + 1)
+    TASK_METRICS.on_enqueued(method)
     await _task_queue.put(task)
     return {"task_id": task.task_id, "status": "queued"}
 
@@ -284,7 +272,7 @@ worker = Worker()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_metrics_server(int(config.get("PROMETHEUS_PORT")))
-
+    bind_queue_metrics(_task_queue)
     worker.start()
     await producer.start()
     await consumer.start(["scenario.events"])

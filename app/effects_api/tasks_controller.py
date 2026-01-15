@@ -27,6 +27,9 @@ from ..common.exceptions.http_exception_wrapper import http_exception
 from ..dependencies import effects_service, effects_utils, file_cache, urban_api_client
 from .dto.development_dto import ContextDevelopmentDTO
 from .modules.service_type_service import get_services_with_ids_from_layer
+from ..prometheus.metrics import get_task_metrics
+
+TASK_METRICS = get_task_metrics()
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -127,6 +130,7 @@ async def create_scenario_task(
             None if force else file_cache.load(method, params_filled.scenario_id, phash)
         )
         if not force and _cache_complete(method, cached):
+            TASK_METRICS.on_cache_hit(method)
             return {"task_id": task_id, "status": "done"}
 
         existing = None if force else _task_map.get(task_id)
@@ -144,6 +148,7 @@ async def create_scenario_task(
         )
         _task_map[task_id] = task
         await _task_queue.put(task)
+        TASK_METRICS.on_enqueued(method)
 
         return {"task_id": task_id, "status": "queued"}
 

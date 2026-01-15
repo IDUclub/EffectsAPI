@@ -1,5 +1,6 @@
 from prometheus_client import Counter, Histogram, Gauge
 
+from app.prometheus.task_metrics import TaskMetrics
 
 CACHE_INVALIDATION_EVENTS_TOTAL = Counter(
     "effects_cache_invalidation_events_total",
@@ -62,16 +63,10 @@ EFFECTS_TASKS_STARTED_TOTAL = Counter(
     labelnames=("method",),
 )
 
-EFFECTS_TASKS_DONE_TOTAL = Counter(
-    "effects_tasks_done_total",
-    "Total number of tasks finished successfully",
-    labelnames=("method",),
-)
-
-EFFECTS_TASKS_FAILED_TOTAL = Counter(
-    "effects_tasks_failed_total",
-    "Total number of tasks failed during execution",
-    labelnames=("method",),
+EFFECTS_TASKS_FINISHED_TOTAL = Counter(
+    "effects_tasks_finished_total",
+    "Total number of tasks finished execution",
+    labelnames=("method", "status"),
 )
 
 EFFECTS_TASK_DURATION_SECONDS = Histogram(
@@ -85,6 +80,10 @@ EFFECTS_TASKS_QUEUE_SIZE = Gauge(
     "effects_tasks_queue_size",
     "Current number of tasks waiting in queue",
 )
+
+def bind_queue_metrics(queue) -> None:
+    """Bind runtime queue instance to observable metrics."""
+    EFFECTS_TASKS_QUEUE_SIZE.set_function(queue.qsize)
 
 EFFECTS_TASKS_RUNNING = Gauge(
     "effects_tasks_running",
@@ -140,3 +139,16 @@ EFFECTS_SOCIO_ECONOMICAL_METRICS_DURATION_SECONDS = Histogram(
     "Duration of evaluate_social_economical_metrics execution",
     buckets=(1, 2, 5, 10, 30, 60, 120, 300, 600),
 )
+
+def get_task_metrics() -> TaskMetrics:
+    """Create TaskMetrics facade."""
+    return TaskMetrics(
+        created_total=EFFECTS_TASKS_CREATED_TOTAL,
+        cache_hit_total=EFFECTS_TASKS_CACHE_HIT_TOTAL,
+        enqueued_total=EFFECTS_TASKS_ENQUEUED_TOTAL,
+        started_total=EFFECTS_TASKS_STARTED_TOTAL,
+        finished_total=EFFECTS_TASKS_FINISHED_TOTAL,
+        duration_seconds=EFFECTS_TASK_DURATION_SECONDS,
+        running=EFFECTS_TASKS_RUNNING,
+        queue_size=EFFECTS_TASKS_QUEUE_SIZE,
+    )

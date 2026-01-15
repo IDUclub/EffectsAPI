@@ -70,20 +70,20 @@ class CacheInvalidationMixin:
         CACHE_INVALIDATION_EVENTS_TOTAL.inc()
         start_time = time.perf_counter()
 
-        try:
-            total_deleted = await asyncio.to_thread(
-                self._invalidation_service.invalidate,
-                event,
-                self._rules,
-            )
-            CACHE_INVALIDATION_SUCCESS_TOTAL.inc()
-            return None
+        logger.info(f"Received event: type={type(event)}")
+        logger.info(
+            f"Invalidate cache for project_id={getattr(event, 'project_id', None)} "
+            f"scenario_id={getattr(event, 'scenario_id', None)}"
+        )
+        total_deleted = await asyncio.to_thread(
+            self._invalidation_service.invalidate,
+            event,
+            self._rules,
+        )
+        CACHE_INVALIDATION_SUCCESS_TOTAL.inc()
 
-        except Exception:
-            CACHE_INVALIDATION_ERROR_TOTAL.inc()
-            raise
-
-        finally:
-            duration = time.perf_counter() - start_time
-            CACHE_INVALIDATION_DURATION_SECONDS.observe(duration)
+        logger.info(f"Cache invalidation completed: deleted_files={total_deleted}")
+        duration = time.perf_counter() - start_time
+        CACHE_INVALIDATION_DURATION_SECONDS.observe(duration)
+        return None
 
