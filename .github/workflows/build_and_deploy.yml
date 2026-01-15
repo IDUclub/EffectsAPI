@@ -6,7 +6,7 @@ env:
 
 jobs:
   build:
-    runs-on: 47_runner
+    runs-on: 102_runner
     outputs:
       now: ${{steps.date.outputs.NOW}}
     steps:
@@ -18,7 +18,7 @@ jobs:
       - name: copy_env
         env:
           ENV_PATH: ${{secrets.ENV_PATH}}
-        run: cp "$ENV_PATH"/.env.development ./
+        run: cp "$ENV_PATH"/.env.production ./
       - name: build
         env:
           NOW: ${{steps.date.outputs.now}}
@@ -28,13 +28,13 @@ jobs:
           NOW: ${{steps.date.outputs.now}}
         run: docker push "$IMAGE_NAME":"$NOW"
   stop_container:
-    runs-on: 47_runner
+    runs-on: 102_runner
     needs: build
     steps:
       - name: stop_container
         run: docker rm -f "$CONTAINER_NAME"
   run_container:
-    runs-on: 47_runner
+    runs-on: 102_runner
     needs: [build, stop_container]
     env:
       NOW: ${{needs.build.outputs.now}}
