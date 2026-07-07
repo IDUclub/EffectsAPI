@@ -248,13 +248,15 @@ async def get_service_types(
     """Return service types depending on the method."""
     if method == "territory_transformation":
         data = await get_services_with_ids_from_layer(
-            scenario_id, method, file_cache, effects_utils, token=token
+            scenario_id, method, file_cache, effects_utils, token=token,
+            client=urban_api_client,
         )
         return ServiceTypesResponse(before=data["before"], after=data.get("after", []))
 
     if method == "values_oriented_requirements":
         services = await get_services_with_ids_from_layer(
-            scenario_id, method, file_cache, effects_utils, token=token
+            scenario_id, method, file_cache, effects_utils, token=token,
+            client=urban_api_client,
         )
         return ValuesServiceTypesResponse(
             services=services.get("services", [])
