@@ -18,6 +18,14 @@ _SOCIAL_VALUES_LOCK = asyncio.Lock()
 _SERVICE_NAME_TO_ID: dict[str, int] = {
     name: sid for sid, name in SERVICE_TYPES_MAPPING.items()
 }
+# One name may be backed by several service_type_ids (e.g. "cafe" -> 61, 64;
+# "wastewater_plant" -> 126, 128). Keep every candidate, in mapping order, so we
+# can pick one that actually exists in the live urban_api registry.
+_SERVICE_NAME_TO_IDS: dict[str, list[int]] = {}
+for _sid, _name in SERVICE_TYPES_MAPPING.items():
+    if _name is None:
+        continue
+    _SERVICE_NAME_TO_IDS.setdefault(_name, []).append(_sid)
 _VALID_SERVICE_NAMES: set[str] = set(_SERVICE_NAME_TO_ID.keys())
 _NUM_SUFFIX_RE = re.compile(r"^\d+$")
 
@@ -75,11 +83,47 @@ async def adapt_service_types(
     return df
 
 
-def _map_services(names: list[str]) -> list[dict]:
+async def _live_service_type_ids(client: UrbanAPIClient) -> set[int]:
+    """Set of service_type_id values that actually exist in the live urban_api."""
+    df = await client.get_service_types()
+    ids: set[int] = set()
+    for sid in df.index.tolist():
+        try:
+            ids.add(int(sid))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def _map_services(
+    names: list[str], valid_ids: set[int] | None = None
+) -> list[dict]:
+    """
+    Map service names back to their service_type_id.
+
+    When ``valid_ids`` is provided (the set of ids present in the live urban_api),
+    a name with several candidate ids resolves to one that actually exists, and a
+    name whose ids are all stale is dropped — so we never hand the client an id
+    that would 404 on the follow-up urban_api request.
+    """
     out = []
-    get_id = _SERVICE_NAME_TO_ID.get
     for n in names:
-        sid = get_id(n)
+        candidates = _SERVICE_NAME_TO_IDS.get(n)
+        if not candidates:
+            continue
+
+        if valid_ids is None:
+            # Preserve the historical "last mapping entry wins" behaviour.
+            sid = candidates[-1]
+        else:
+            sid = next((c for c in candidates if c in valid_ids), None)
+            if sid is None:
+                logger.warning(
+                    f"Service '{n}' has no service_type_id present in urban_api "
+                    f"(candidates={candidates}); omitting from response"
+                )
+                continue
+
         out.append({"id": sid, "name": n})
     return out
 
@@ -96,6 +140,7 @@ async def get_services_with_ids_from_layer(
     cache: FileCache,
     utils: EffectsUtils,
     token: str | None = None,
+    client: UrbanAPIClient | None = None,
 ) -> dict:
     if method == "values_oriented_requirements":
         scenario_id = await utils.resolve_base_id(token, scenario_id)
@@ -106,17 +151,29 @@ async def get_services_with_ids_from_layer(
 
     data: dict = cached["data"]
 
+    # Validate mapped ids against the live urban_api registry so the SERVICE_TYPES_MAPPING
+    # drifting out of sync with the instance never leaks a non-existent id to the client.
+    valid_ids: set[int] | None = None
+    if client is not None:
+        try:
+            valid_ids = await _live_service_type_ids(client)
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch live service_types for id validation, "
+                f"falling back to raw mapping: {e!r}"
+            )
+
     if "before" in data or "after" in data:
         before_names = _filter_service_keys(data.get("before"))
         after_names = _filter_service_keys(data.get("after"))
         return {
-            "before": _map_services(before_names),
-            "after": _map_services(after_names),
+            "before": _map_services(before_names, valid_ids),
+            "after": _map_services(after_names, valid_ids),
         }
 
     if "provision" in data:
         prov_names = _filter_service_keys(data["provision"])
-        return {"services": _map_services(prov_names)}
+        return {"services": _map_services(prov_names, valid_ids)}
 
     return {"before": [], "after": []}
 
