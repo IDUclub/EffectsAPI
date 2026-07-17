@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+from idu_service_auth import KeycloakTokenConfig
 from iduconfig import Config
 from loguru import logger
 
@@ -11,6 +12,11 @@ from app.broker_handlers.scenario_updated_handler import (
 )
 from app.clients.urban_api_client import UrbanAPIClient
 from app.common.api_handlers.json_api_handler import JSONAPIHandler
+from app.common.auth.keycloak_validator import (
+    KeycloakTokenValidator,
+    KeycloakValidatorConfig,
+)
+from app.common.auth.service_token import ServiceTokenProvider
 from app.common.caching.caching_service import FileCache
 from app.common.consumer_wrapper import ConsumerWrapper
 from app.common.producer_wrapper import ProducerWrapper
@@ -32,8 +38,30 @@ logger.add(
     level="INFO",
 )
 
+keycloak_url = config.get("KEYCLOAK_URL")
+keycloak_realm = config.get("KEYCLOAK_REALM")
+keycloak_client_id = config.get("KEYCLOAK_CLIENT_ID")
+
+token_validator = KeycloakTokenValidator(
+    KeycloakValidatorConfig(
+        auth_server_url=keycloak_url,
+        realm=keycloak_realm,
+        audience=keycloak_client_id,
+        verify_audience=False,
+    )
+)
+
+service_token_provider = ServiceTokenProvider(
+    KeycloakTokenConfig(
+        auth_server_url=keycloak_url,
+        realm=keycloak_realm,
+        client_id=keycloak_client_id,
+        client_secret=config.get("KEYCLOAK_CLIENT_SECRET"),
+    )
+)
+
 json_api_handler = JSONAPIHandler(config.get("URBAN_API"))
-urban_api_client = UrbanAPIClient(json_api_handler)
+urban_api_client = UrbanAPIClient(json_api_handler, service_token_provider)
 file_cache = FileCache()
 scenario_service = ScenarioService(urban_api_client)
 effects_utils = EffectsUtils(urban_api_client)

@@ -114,6 +114,8 @@ async def create_scenario_task(
     if method not in TASK_METHODS:
         raise http_exception(404, f"method '{method}' is not registered", method)
 
+    await urban_api_client.ensure_scenario_access(params.scenario_id, token)
+
     coarse_key = f"{method}:{params.scenario_id}"
     lock = _get_lock(coarse_key)
 
@@ -178,6 +180,8 @@ async def create_project_task(
     """
     if method not in ["social_economical_metrics"]:
         raise http_exception(400, f"method '{method}' is not project-based", method)
+
+    await urban_api_client.ensure_project_access(params.project_id, token)
 
     try:
         result = await create_task(method, token, params)
@@ -251,6 +255,8 @@ async def get_service_types(
     token: str = Depends(verify_token),
 ):
     """Return service types depending on the method."""
+    await urban_api_client.ensure_scenario_access(scenario_id, token)
+
     if method == "territory_transformation":
         data = await get_services_with_ids_from_layer(
             scenario_id, method, file_cache, effects_utils, token=token,
@@ -342,6 +348,8 @@ async def get_values_oriented_requirements_layer(
     service_name: str,
     token: str = Depends(verify_token),
 ):
+    await urban_api_client.ensure_scenario_access(scenario_id, token)
+
     base_id = await effects_utils.resolve_base_id(token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
@@ -386,6 +394,8 @@ async def get_values_oriented_requirements_table(
     scenario_id: int,
     token: str = Depends(verify_token),
 ):
+    await urban_api_client.ensure_scenario_access(scenario_id, token)
+
     base_id = await effects_utils.resolve_base_id(token, scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)

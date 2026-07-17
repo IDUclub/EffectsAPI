@@ -4,17 +4,71 @@ from typing import Any, Dict, List, Literal
 import geopandas as gpd
 import pandas as pd
 import shapely
+from fastapi import HTTPException
 from loguru import logger
 
 from app.common.api_handlers.json_api_handler import JSONAPIHandler
+from app.common.auth.service_token import ServiceTokenProvider
 from app.common.exceptions.http_exception_wrapper import http_exception
+
+NO_ACCESS_STATUSES = (401, 403)
 
 
 class UrbanAPIClient:
+    """Read Urban API on the service identity.
 
-    def __init__(self, json_handler: JSONAPIHandler) -> None:
+    Every request here authenticates as the `effects` service account, not as the
+    requesting user: a user token lives 5 minutes while a calculation issues
+    authenticated calls well beyond that, so a user token captured at task creation
+    would expire mid-run. Callers still pass a `token` argument, which this client
+    ignores; see `ensure_scenario_access` for where the user's own token is used.
+    """
+
+    def __init__(
+        self, json_handler: JSONAPIHandler, service_token: ServiceTokenProvider
+    ) -> None:
         self.json_handler = json_handler
+        self.service_token = service_token
         self.__name__ = "UrbanAPIClient"
+
+    async def _auth_headers(self) -> Dict[str, str]:
+        """Build headers from a freshly read service token.
+
+        Read per request rather than cached by the caller, so long calculations pick
+        up the background-refreshed token instead of holding a stale one.
+        """
+        return await self.service_token.get_authorization_headers()
+
+    async def ensure_scenario_access(self, scenario_id: int, user_token: str) -> None:
+        """Authorize the requester against Urban API using their own token.
+
+        Called while the user token is still fresh, so that the calculation may then
+        run on the service identity without widening what the requester can reach.
+        """
+        await self._ensure_access(
+            f"/api/v1/scenarios/{scenario_id}",
+            user_token,
+            {"scenario_id": scenario_id},
+        )
+
+    async def ensure_project_access(self, project_id: int, user_token: str) -> None:
+        await self._ensure_access(
+            f"/api/v1/projects/{project_id}",
+            user_token,
+            {"project_id": project_id},
+        )
+
+    async def _ensure_access(
+        self, endpoint: str, user_token: str, target: Dict[str, Any]
+    ) -> None:
+        try:
+            await self.json_handler.get(
+                endpoint, headers={"Authorization": f"Bearer {user_token}"}
+            )
+        except HTTPException as exc:
+            if exc.status_code in NO_ACCESS_STATUSES:
+                raise http_exception(403, "Access denied", _input=target) from exc
+            raise
 
     # TODO context
     async def get_physical_objects(
@@ -25,7 +79,7 @@ class UrbanAPIClient:
     ) -> gpd.GeoDataFrame | None:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/physical_objects_with_geometry",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=await self._auth_headers(),
             params=params,
         )
         features = (res or {}).get("features") or []
@@ -39,7 +93,7 @@ class UrbanAPIClient:
     async def get_services(
         self, scenario_id: int, token: str, **kwargs: Any
     ) -> gpd.GeoDataFrame:
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/services_with_geometry",
             headers=headers,
@@ -53,7 +107,7 @@ class UrbanAPIClient:
     async def get_functional_zones_sources(
         self, scenario_id: int, token: str
     ) -> pd.DataFrame:
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/functional_zone_sources",
             headers=headers,
@@ -63,7 +117,7 @@ class UrbanAPIClient:
     async def get_functional_zones(
         self, scenario_id: int, year: int, source: str, token: str
     ) -> gpd.GeoDataFrame:
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/context/functional_zones",
             params={"year": year, "source": source},
@@ -77,14 +131,14 @@ class UrbanAPIClient:
     async def get_project(self, project_id: int, token: str) -> Dict[str, Any]:
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=await self._auth_headers(),
         )
         return res
 
     async def get_project_geometry(self, project_id: int, token: str):
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/territory",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=await self._auth_headers(),
         )
         geometry_json = json.dumps(res["geometry"])
         return shapely.from_geojson(geometry_json)
@@ -93,7 +147,7 @@ class UrbanAPIClient:
     async def get_scenario_info(self, target_scenario_id: int, token: str) -> dict:
 
         url = f"/api/v1/scenarios/{target_scenario_id}"
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         try:
             response = await self.json_handler.get(url, headers)
             return response
@@ -107,7 +161,7 @@ class UrbanAPIClient:
             ) from e
 
     async def get_scenario(self, scenario_id: int, token: str) -> Dict[str, Any]:
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}", headers=headers
         )
@@ -118,7 +172,7 @@ class UrbanAPIClient:
         scenario_id: int,
         token: str,
     ) -> pd.DataFrame:
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/functional_zone_sources",
             headers=headers,
@@ -130,7 +184,7 @@ class UrbanAPIClient:
     ) -> gpd.GeoDataFrame:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/functional_zones",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=await self._auth_headers(),
             params={"year": year, "source": source},
         )
         features = res["features"]
@@ -143,7 +197,7 @@ class UrbanAPIClient:
     ) -> gpd.GeoDataFrame | None:
         res = await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/physical_objects_with_geometry",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=await self._auth_headers(),
             params=kwargs,
         )
         if res["features"]:
@@ -157,7 +211,7 @@ class UrbanAPIClient:
     ) -> dict:
         return await self.json_handler.get(
             f"/api/v1/scenarios/{scenario_id}/services_with_geometry",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=await self._auth_headers(),
             params=kwargs,
         )
 
@@ -241,7 +295,7 @@ class UrbanAPIClient:
                     "available_sources": ["PZZ", "OSM"],
                 },
             )
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         if project:
             available_sources = await self.json_handler.get(
                 f"/api/v1/scenarios/{data_id}/functional_zone_sources", headers=headers
@@ -265,7 +319,7 @@ class UrbanAPIClient:
     ) -> int:
         endpoint = f"/api/v1/scenarios/{scenario_id}"
         response = await self.json_handler.get(
-            endpoint, headers={"Authorization": f"Bearer {token}"}
+            endpoint, headers=await self._auth_headers()
         )
         project_id = response.get("project", {}).get("project_id")
         if project_id is None:
@@ -281,7 +335,7 @@ class UrbanAPIClient:
         url = f"/api/v1/projects/{project_id}"
         try:
             response = await self.json_handler.get(
-                url, headers={"Authorization": f"Bearer {token}"}
+                url, headers=await self._auth_headers()
             )
             return response
         except Exception as e:
@@ -374,7 +428,7 @@ class UrbanAPIClient:
         return shapely.from_geojson(geom)
 
     async def get_base_scenario_id(self, project_id: int, token: str) -> int:
-        headers =  {"Authorization": f"Bearer {token}"}
+        headers = await self._auth_headers()
         scenarios = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/scenarios",
             headers=headers,
@@ -389,7 +443,7 @@ class UrbanAPIClient:
     async def get_project_scenarios(
         self, project_id: int, token: str
     ) -> List[Dict[str, Any]]:
-        headers = {"Authorization": f"Bearer {token}"} if token else None
+        headers = await self._auth_headers()
         res = await self.json_handler.get(
             f"/api/v1/projects/{project_id}/scenarios",
             headers=headers,
@@ -413,6 +467,8 @@ class UrbanAPIClient:
         return res
 
     async def get_indicator_scenario_value(self, scenario_id: int, token: str) -> dict:
-        headers = {"Authorization": f"Bearer {token}"} if token else None
-        res = await self.json_handler.get(f"/api/v1/scenarios/{scenario_id}/indicators_values", headers=headers)
+        headers = await self._auth_headers()
+        res = await self.json_handler.get(
+            f"/api/v1/scenarios/{scenario_id}/indicators_values", headers=headers
+        )
         return res

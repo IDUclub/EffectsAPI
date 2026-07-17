@@ -1,20 +1,27 @@
 import asyncio
 import contextlib
 import json
+import time
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Literal, Coroutine
+from typing import Any, Callable, Coroutine, Literal
 
 import geopandas as gpd
 from fastapi import FastAPI
 from loguru import logger
 
 from app.common.exceptions.http_exception_wrapper import http_exception
-from app.dependencies import effects_service, file_cache, effects_utils, consumer, producer, config
+from app.dependencies import (
+    config,
+    consumer,
+    effects_service,
+    effects_utils,
+    file_cache,
+    producer,
+    service_token_provider,
+    token_validator,
+)
+from app.prometheus.metrics import bind_queue_metrics, get_task_metrics
 from app.prometheus.server import start_metrics_server, stop_metrics_server
-import time
-
-from app.prometheus.metrics import (
-    bind_queue_metrics, get_task_metrics)
 
 MethodFunc = Callable[[str, Any], Coroutine[Any, Any, Any]]
 TASK_METRICS = get_task_metrics()
@@ -23,7 +30,7 @@ TASK_METHODS: dict[str, MethodFunc] = {
     "territory_transformation": effects_service.territory_transformation,
     "values_transformation": effects_service.values_transformation,
     "values_oriented_requirements": effects_service.values_oriented_requirements,
-    "social_economical_metrics": effects_service.evaluate_social_economical_metrics
+    "social_economical_metrics": effects_service.evaluate_social_economical_metrics,
 }
 
 
@@ -36,6 +43,7 @@ def _cache_complete(method: str, cached_obj: dict | None) -> bool:
             return True
         return bool(data.get("before"))
     return True
+
 
 _task_queue: asyncio.Queue["AnyTask"] = asyncio.Queue()
 _task_map: dict[str, "AnyTask"] = {}
@@ -83,7 +91,11 @@ class AnyTask:
             self.status = "running"
 
             force = getattr(self.params, "force", False)
-            cached = None if force else self.cache.load(self.method, self.scenario_id, self.param_hash)
+            cached = (
+                None
+                if force
+                else self.cache.load(self.method, self.scenario_id, self.param_hash)
+            )
 
             if not force and _cache_complete(self.method, cached):
                 logger.info(f"[{self.task_id}] loaded from cache")
@@ -98,7 +110,6 @@ class AnyTask:
             self.result = self._serialize_result(raw_data)
             self.status = "done"
             TASK_METRICS.on_finished_success(self.method)
-
 
         except Exception as exc:
             logger.exception(f"[{self.task_id}] failed")
@@ -116,9 +127,11 @@ class AnyTask:
 
         if isinstance(raw_data, dict):
             return {
-                k: json.loads(v.to_json(drop_id=True))
-                if isinstance(v, gpd.GeoDataFrame)
-                else v
+                k: (
+                    json.loads(v.to_json(drop_id=True))
+                    if isinstance(v, gpd.GeoDataFrame)
+                    else v
+                )
                 for k, v in raw_data.items()
             }
 
@@ -154,8 +167,12 @@ async def create_task(
             phash = file_cache.params_hash(params_for_hash)
         except Exception as e:
             logger.exception("Failed to hash params (project)")
-            raise http_exception(500, "Failed to hash task parameters",
-                                 _input=params_for_hash, _detail=str(e))
+            raise http_exception(
+                500,
+                "Failed to hash task parameters",
+                _input=params_for_hash,
+                _detail=str(e),
+            )
 
         task_id = f"{method}_{owner_id}_{phash}"
 
@@ -163,8 +180,12 @@ async def create_task(
             cached = None if force else file_cache.load(method, owner_id, phash)
         except Exception as e:
             logger.exception("Cache load failed (project)")
-            raise http_exception(500, "Cache load failed",
-                                 _input={"method": method, "owner_id": owner_id}, _detail=str(e))
+            raise http_exception(
+                500,
+                "Cache load failed",
+                _input={"method": method, "owner_id": owner_id},
+                _detail=str(e),
+            )
 
         if not force and _cache_complete(method, cached):
             TASK_METRICS.on_cache_hit(method)
@@ -181,20 +202,27 @@ async def create_task(
         return {"task_id": task_id, "status": "queued"}
 
     if method == "values_oriented_requirements":
-        base_id = await effects_utils._resolve_base_id(token, getattr(params, "scenario_id"))
+        base_id = await effects_utils._resolve_base_id(
+            token, getattr(params, "scenario_id")
+        )
         logger.info(
             "[Tasks] values_oriented_requirements base_id=%s (requested=%s)",
-            base_id, getattr(params, "scenario_id")
+            base_id,
+            getattr(params, "scenario_id"),
         )
 
-        base_params = params.model_copy(update={
-            "scenario_id": base_id,
-            "proj_func_zone_source": None,
-            "proj_func_source_year": None,
-            "context_func_zone_source": None,
-            "context_func_source_year": None,
-        })
-        norm_params = await effects_service.get_optimal_func_zone_data(base_params, token)
+        base_params = params.model_copy(
+            update={
+                "scenario_id": base_id,
+                "proj_func_zone_source": None,
+                "proj_func_source_year": None,
+                "context_func_zone_source": None,
+                "context_func_source_year": None,
+            }
+        )
+        norm_params = await effects_service.get_optimal_func_zone_data(
+            base_params, token
+        )
 
         params_for_hash = await effects_service.build_hash_params(norm_params, token)
         phash = file_cache.params_hash(params_for_hash)
@@ -269,11 +297,13 @@ class Worker:
 
 worker = Worker()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_metrics_server(int(config.get("PROMETHEUS_PORT")))
     bind_queue_metrics(_task_queue)
     worker.start()
+    await service_token_provider.start()
     await producer.start()
     await consumer.start(["scenario.events"])
     try:
@@ -282,4 +312,6 @@ async def lifespan(app: FastAPI):
         await consumer.stop()
         await producer.stop()
         await worker.stop()
+        await service_token_provider.stop()
+        await token_validator.aclose()
         stop_metrics_server()
