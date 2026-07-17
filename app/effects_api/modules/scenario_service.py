@@ -24,7 +24,6 @@ from app.effects_api.modules.service_type_service import adapt_service_types
 from app.effects_api.modules.services_service import adapt_services
 
 
-
 def close_gaps(gdf, tolerance):  # taken from momepy
     geom = gdf.geometry.array
     coords = shapely.get_coordinates(geom)
@@ -56,23 +55,21 @@ class ScenarioService:
     def __init__(self, urban_api_client: UrbanAPIClient):
         self.client = urban_api_client
 
-    async def _get_project_boundaries(
-        self, project_id: int, token: str
-    ) -> gpd.GeoDataFrame:
-        geom = await self.client.get_project_geometry(project_id, token)
+    async def _get_project_boundaries(self, project_id: int) -> gpd.GeoDataFrame:
+        geom = await self.client.get_project_geometry(project_id)
         return gpd.GeoDataFrame(geometry=[geom], crs=4326)
 
-    async def _get_scenario_roads(self, scenario_id: int, token: str):
+    async def _get_scenario_roads(self, scenario_id: int):
         gdf = await self.client.get_physical_objects_scenario(
-            scenario_id, token, physical_object_function_id=ROADS_ID
+            scenario_id, physical_object_function_id=ROADS_ID
         )
         if gdf is None:
             return None
         return gdf[["geometry"]].reset_index(drop=True)
 
-    async def _get_scenario_water(self, scenario_id: int, token: str):
+    async def _get_scenario_water(self, scenario_id: int):
         gdf = await self.client.get_physical_objects_scenario(
-            scenario_id, token, physical_object_function_id=WATER_ID
+            scenario_id, physical_object_function_id=WATER_ID
         )
         if gdf is None:
             return None
@@ -81,9 +78,7 @@ class ScenarioService:
     async def _get_scenario_blocks(
         self,
         user_scenario_id: int,
-        boundaries: gpd.GeoDataFrame,
-        token: str,
-    ) -> gpd.GeoDataFrame:
+        boundaries: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         crs = boundaries.crs
         boundaries.geometry = boundaries.buffer(-1)
 
@@ -91,8 +86,8 @@ class ScenarioService:
             water,
             user_roads,
         ) = await asyncio.gather(
-            self._get_scenario_water(user_scenario_id, token),
-            self._get_scenario_roads(user_scenario_id, token),
+            self._get_scenario_water(user_scenario_id),
+            self._get_scenario_roads(user_scenario_id),
         )
 
         if water is not None and not water.empty:
@@ -118,49 +113,42 @@ class ScenarioService:
         blocks = cut_urban_blocks(boundaries, lines, polygons)
         return blocks
 
-    async def _get_scenario_info(self, scenario_id: int, token: str) -> tuple[int, int]:
-        scenario = await self.client.get_scenario(scenario_id, token)
+    async def _get_scenario_info(self, scenario_id: int) -> tuple[int, int]:
+        scenario = await self.client.get_scenario(scenario_id)
         project_id = scenario["project"]["project_id"]
-        project = await self.client.get_project(project_id, token)
+        project = await self.client.get_project(project_id)
         base_scenario_id = project["base_scenario"]["id"]
         return project_id, base_scenario_id
 
     async def get_scenario_blocks(
-        self, user_scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+        self, user_scenario_id: int) -> gpd.GeoDataFrame:
         project_id, base_scenario_id = await self._get_scenario_info(
-            user_scenario_id, token
-        )
-        project_boundaries = await self._get_project_boundaries(project_id, token)
+            user_scenario_id)
+        project_boundaries = await self._get_project_boundaries(project_id)
         crs = project_boundaries.estimate_utm_crs()
         project_boundaries = project_boundaries.to_crs(crs)
         return await self._get_scenario_blocks(
-            user_scenario_id, project_boundaries, token
-        )
+            user_scenario_id, project_boundaries)
 
     async def get_scenario_functional_zones(
         self,
         scenario_id: int,
-        token: str,
         source: str | None = None,
-        year: int | None = None,
-    ) -> gpd.GeoDataFrame:
+        year: int | None = None) -> gpd.GeoDataFrame:
         functional_zones = await self.client.get_functional_zones_scenario(
-            scenario_id, token, year, source
+            scenario_id, year, source
         )
         functional_zones = functional_zones.loc[
             functional_zones.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
         ].reset_index(drop=True)
         return adapt_functional_zones(functional_zones)
 
-    async def get_scenario_buildings(self, scenario_id: int, token: str):
+    async def get_scenario_buildings(self, scenario_id: int):
         try:
             gdf = await self.client.get_physical_objects_scenario(
                 scenario_id,
-                token,
                 physical_object_type_id=LIVING_BUILDINGS_ID,
-                centers_only=False,
-            )
+                centers_only=False)
             if gdf is None:
                 return None
             gdf = adapt_buildings(gdf.reset_index(drop=True))
@@ -176,12 +164,10 @@ class ScenarioService:
             ) from e
 
     async def get_scenario_services(
-        self, scenario_id: int, service_types: pd.DataFrame, token: str
-    ):
+        self, scenario_id: int, service_types: pd.DataFrame):
         try:
             res = await self.client.get_services_scenario(
-                scenario_id, centers_only=True, token=token
-            )
+                scenario_id, centers_only=True)
             features = res.get("features") or []
 
             if not features:
@@ -210,9 +196,8 @@ class ScenarioService:
             ) from e
 
     async def load_blocks_scenario(
-        self, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame:
-        gdf = await self.get_scenario_blocks(scenario_id, token)
+        self, scenario_id: int) -> gpd.GeoDataFrame:
+        gdf = await self.get_scenario_blocks(scenario_id)
         gdf["site_area"] = gdf.area
         return gdf
 
@@ -221,20 +206,17 @@ class ScenarioService:
         blocks: gpd.GeoDataFrame,
         scenario_id: int,
         source: str | None,
-        year: int | None,
-        token: str,
-    ) -> gpd.GeoDataFrame:
+        year: int | None) -> gpd.GeoDataFrame:
         fzones = await self.get_scenario_functional_zones(
-            scenario_id, token, source, year
+            scenario_id, source, year
         )
         fzones = fzones.to_crs(blocks.crs)
         lu = assign_land_use(blocks, fzones, LAND_USE_RULES)
         return blocks.join(lu.drop(columns=["geometry"]))
 
     async def enrich_with_buildings_scenario(
-        self, blocks: gpd.GeoDataFrame, scenario_id: int, token: str
-    ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
-        buildings = await self.get_scenario_buildings(scenario_id, token)
+        self, blocks: gpd.GeoDataFrame, scenario_id: int) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
+        buildings = await self.get_scenario_buildings(scenario_id)
         if buildings is None:
             blocks["count_buildings"] = 0
             return blocks, None
@@ -253,11 +235,10 @@ class ScenarioService:
         return blocks, buildings
 
     async def enrich_with_services_scenario(
-        self, blocks: gpd.GeoDataFrame, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+        self, blocks: gpd.GeoDataFrame, scenario_id: int) -> gpd.GeoDataFrame:
         stypes = await self.client.get_service_types()
         stypes = await adapt_service_types(stypes, self.client)
-        sdict = await self.get_scenario_services(scenario_id, stypes, token)
+        sdict = await self.get_scenario_services(scenario_id, stypes)
 
         for stype, services in sdict.items():
             services = services.to_crs(blocks.crs)
@@ -276,25 +257,21 @@ class ScenarioService:
         self,
         scenario_id: int,
         source: str | None = None,
-        year: int | None = None,
-        token: str | None = None,
-    ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
+        year: int | None = None) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
 
         logger.info(f"[Scenario {scenario_id}] load blocks")
-        blocks = await self.load_blocks_scenario(scenario_id, token)
+        blocks = await self.load_blocks_scenario(scenario_id)
 
         logger.info("Assigning land-use for scenario")
         blocks = await self.assign_land_use_to_blocks_scenario(
-            blocks, scenario_id, source, year, token
-        )
+            blocks, scenario_id, source, year)
 
         logger.info("Aggregating buildings for scenario")
         blocks, buildings = await self.enrich_with_buildings_scenario(
-            blocks, scenario_id, token
-        )
+            blocks, scenario_id)
 
         logger.info("Aggregating services for scenario")
-        blocks = await self.enrich_with_services_scenario(blocks, scenario_id, token)
+        blocks = await self.enrich_with_services_scenario(blocks, scenario_id)
 
         blocks["is_project"] = True
         logger.success(f"[scenario {scenario_id}] blocks layer ready")

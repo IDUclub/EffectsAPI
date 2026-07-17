@@ -38,59 +38,48 @@ class ContextService:
         self.client = urban_api_client
         self.cache = cache
 
-    async def _get_project_boundaries(
-        self, project_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+    async def _get_project_boundaries(self, project_id: int) -> gpd.GeoDataFrame:
         """Return project boundary polygon as GeoDataFrame (EPSG:4326)."""
-        geom = await self.client.get_project_geometry(project_id, token=token)
+        geom = await self.client.get_project_geometry(project_id)
         return gpd.GeoDataFrame(geometry=[geom], crs=4326)
 
-    async def _get_context_boundaries(
-        self, project_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+    async def _get_context_boundaries(self, project_id: int) -> gpd.GeoDataFrame:
         """Return union of context territories as GeoDataFrame (EPSG:4326)."""
-        project = await self.client.get_project(project_id, token)
+        project = await self.client.get_project(project_id)
         context_ids = project["properties"]["context"]
         geometries = [
             await self.client.get_territory_geometry(tid) for tid in context_ids
         ]
         return gpd.GeoDataFrame(geometry=geometries, crs=4326)
 
-    async def _get_context_roads(
-            self, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame | None:
+    async def _get_context_roads(self, scenario_id: int) -> gpd.GeoDataFrame | None:
         """Return roads geometry for context cut (only geometry column)."""
         gdf = await self.client.get_physical_objects(
-            scenario_id, token, physical_object_function_id=ROADS_ID
+            scenario_id, physical_object_function_id=ROADS_ID
         )
         if gdf is None:
             return None
         return gdf[["geometry"]].reset_index(drop=True)
 
-    async def _get_context_water(
-            self, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame | None:
+    async def _get_context_water(self, scenario_id: int) -> gpd.GeoDataFrame | None:
         """Return water geometry for context cut (only geometry column)."""
         gdf = await self.client.get_physical_objects(
-            scenario_id, token=token, physical_object_function_id=WATER_ID
+            scenario_id, physical_object_function_id=WATER_ID
         )
         if gdf is None:
             return None
         return gdf[["geometry"]].reset_index(drop=True)
 
     async def _get_context_blocks(
-            self,
-            scenario_id: int,
-            boundaries: gpd.GeoDataFrame,
-            token: str,
+        self, scenario_id: int, boundaries: gpd.GeoDataFrame
     ) -> gpd.GeoDataFrame:
         """Construct context blocks by cutting boundaries with roads/water."""
         crs = boundaries.crs
         boundaries.geometry = boundaries.buffer(-1)
 
         water, roads = await asyncio.gather(
-            self._get_context_water(scenario_id, token),
-            self._get_context_roads(scenario_id, token),
+            self._get_context_water(scenario_id),
+            self._get_context_roads(scenario_id),
         )
 
         if water is not None and not water.empty:
@@ -114,14 +103,14 @@ class ContextService:
         return blocks
 
     async def get_context_blocks(
-        self, project_id: int, scenario_id: int, token: str
+        self, project_id: int, scenario_id: int
     ) -> gpd.GeoDataFrame:
         """
         Build context blocks (outside project boundary but inside context territories).
         """
         project_boundaries, context_boundaries = await asyncio.gather(
-            self._get_project_boundaries(project_id, token),
-            self._get_context_boundaries(project_id, token),
+            self._get_project_boundaries(project_id),
+            self._get_context_boundaries(project_id),
         )
 
         crs = context_boundaries.estimate_utm_crs()
@@ -131,40 +120,31 @@ class ContextService:
         context_boundaries = context_boundaries.overlay(
             project_boundaries, how="difference"
         )
-        return await self._get_context_blocks(scenario_id, context_boundaries, token)
+        return await self._get_context_blocks(scenario_id, context_boundaries)
 
     async def get_context_functional_zones(
-        self,
-        scenario_id: int,
-        source: str | None,
-        year: int | None,
-        token: str,
+        self, scenario_id: int, source: str | None, year: int | None
     ) -> gpd.GeoDataFrame:
         """
         Fetch + adapt functional zones for context by best source/year if not given.
         """
-        sources_df = await self.client.get_functional_zones_sources(scenario_id, token)
+        sources_df = await self.client.get_functional_zones_sources(scenario_id)
         year, source = await get_best_functional_zones_source(sources_df, source, year)
         functional_zones = await self.client.get_functional_zones(
-            scenario_id, year, source, token
+            scenario_id, year, source
         )
         functional_zones = functional_zones.loc[
             functional_zones.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
         ].reset_index(drop=True)
         return adapt_functional_zones(functional_zones)
 
-    async def get_context_buildings(
-        self, scenario_id: int, token: str
-    ) -> gpd.GeoDataFrame | None:
+    async def get_context_buildings(self, scenario_id: int) -> gpd.GeoDataFrame | None:
         """
         Fetch, adapt and impute living buildings for context.
         Returns EPSG:4326 GeoDataFrame or None if not found.
         """
         gdf = await self.client.get_physical_objects(
-            scenario_id,
-            token,
-            physical_object_type_id=LIVING_BUILDINGS_ID,
-            centers_only=True,
+            scenario_id, physical_object_type_id=LIVING_BUILDINGS_ID, centers_only=True
         )
         if gdf is None or gdf.empty:
             return None
@@ -174,23 +154,21 @@ class ContextService:
         return impute_buildings(gdf.to_crs(crs)).to_crs(4326)
 
     async def get_context_services(
-        self, scenario_id: int, service_types: pd.DataFrame, token: str
+        self, scenario_id: int, service_types: pd.DataFrame
     ) -> Dict[str, gpd.GeoDataFrame]:
         """
         Fetch and adapt services by service type (dict of GeoDataFrames).
         """
-        gdf = await self.client.get_services(scenario_id, token, centers_only=True)
+        gdf = await self.client.get_services(scenario_id, centers_only=True)
         gdf = gdf.to_crs(gdf.estimate_utm_crs())
         gdfs = adapt_services(gdf.reset_index(drop=True), service_types)
         return {st: impute_services(gdf, st) for st, gdf in gdfs.items()}
 
-    async def get_context_territories(
-        self, project_id: int, token: str
-    ) -> gpd.GeoDataFrame:
+    async def get_context_territories(self, project_id: int) -> gpd.GeoDataFrame:
         """
         Return context territories as polygons with column 'parent' = territory_id (EPSG:4326).
         """
-        project = await self.client.get_all_project_info(project_id, token)
+        project = await self.client.get_all_project_info(project_id)
         context_ids = project["properties"]["context"]
         data = [
             {
@@ -202,13 +180,13 @@ class ContextService:
         return gpd.GeoDataFrame(data=data, crs=4326)
 
     async def load_context_blocks(
-        self, scenario_id: int, token: str
+        self, scenario_id: int
     ) -> Tuple[gpd.GeoDataFrame, int]:
         """
         Load raw context blocks and compute site_area.
         """
-        project_id = await self.client.get_project_id(scenario_id, token)
-        blocks = await self.get_context_blocks(project_id, scenario_id, token)
+        project_id = await self.client.get_project_id(scenario_id)
+        blocks = await self.get_context_blocks(project_id, scenario_id)
         blocks["site_area"] = blocks.area
         return blocks, project_id
 
@@ -218,25 +196,22 @@ class ContextService:
         scenario_id: int,
         source: str | None,
         year: int | None,
-        token: str,
     ) -> gpd.GeoDataFrame:
         """
         Assign land use to blocks via functional zones and LAND_USE_RULES.
         """
-        fzones = await self.get_context_functional_zones(
-            scenario_id, source, year, token
-        )
+        fzones = await self.get_context_functional_zones(scenario_id, source, year)
         fzones = fzones.to_crs(blocks.crs)
         lu = assign_land_use(blocks, fzones, LAND_USE_RULES)
         return blocks.join(lu.drop(columns=["geometry"]))
 
     async def enrich_with_context_buildings(
-        self, blocks: gpd.GeoDataFrame, scenario_id: int, token: str
+        self, blocks: gpd.GeoDataFrame, scenario_id: int
     ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
         """
         Aggregate living buildings on blocks (count_buildings), keep 'is_living' column.
         """
-        buildings = await self.get_context_buildings(scenario_id, token)
+        buildings = await self.get_context_buildings(scenario_id)
         if buildings is None:
             blocks["count_buildings"] = 0
             blocks["is_living"] = None
@@ -255,7 +230,7 @@ class ContextService:
         return blocks, buildings
 
     async def enrich_with_context_services(
-        self, blocks: gpd.GeoDataFrame, scenario_id: int, token: str
+        self, blocks: gpd.GeoDataFrame, scenario_id: int
     ) -> gpd.GeoDataFrame:
         """
         Aggregate services on blocks: add capacity_{st} / count_{st} columns.
@@ -263,7 +238,7 @@ class ContextService:
         stypes = await self.client.get_service_types()
         stypes = await adapt_service_types(stypes, self.client)
 
-        sdict = await self.get_context_services(scenario_id, stypes, token)
+        sdict = await self.get_context_services(scenario_id, stypes)
         if not sdict:
             logger.info(
                 f"No context services to aggregate for scenario_id={scenario_id}"
@@ -285,11 +260,7 @@ class ContextService:
         return blocks
 
     async def aggregate_blocks_layer_context(
-        self,
-        scenario_id: int,
-        source: str | None = None,
-        year: int | None = None,
-        token: str | None = None,
+        self, scenario_id: int, source: str | None = None, year: int | None = None
     ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame | None]:
         """
         Build full context blocks layer:
@@ -299,20 +270,18 @@ class ContextService:
           4) enrich with services
         """
         logger.info(f"[Context {scenario_id}] load blocks")
-        blocks, _project_id = await self.load_context_blocks(scenario_id, token)
+        blocks, _project_id = await self.load_context_blocks(scenario_id)
 
         logger.info("Assigning land-use for context")
-        blocks = await self.assign_land_use_context(
-            blocks, scenario_id, source, year, token
-        )
+        blocks = await self.assign_land_use_context(blocks, scenario_id, source, year)
 
         logger.info("Aggregating buildings for context")
         blocks, buildings = await self.enrich_with_context_buildings(
-            blocks, scenario_id, token
+            blocks, scenario_id
         )
 
         logger.info("Aggregating services for context")
-        blocks = await self.enrich_with_context_services(blocks, scenario_id, token)
+        blocks = await self.enrich_with_context_services(blocks, scenario_id)
 
         logger.success(f"[Context {scenario_id}] blocks layer ready", scenario_id)
         return blocks, buildings
@@ -328,9 +297,7 @@ class ContextService:
         return list(context_blocks.index)
 
     async def get_shared_context(
-            self,
-            project_id: int,
-            token: str,
+        self, project_id: int
     ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, pd.DataFrame]:
         """
         Get cached context (blocks, territories, service_types: artifacts) by project_id,
@@ -365,10 +332,12 @@ class ContextService:
 
         logger.info(f"Shared context cache miss for project_id={project_id} — is building")
 
-        territory_id = (await self.client.get_all_project_info(project_id, token))["territory"]["id"]
-        base_sid = await self.client.get_base_scenario_id(project_id, token)
+        territory_id = (await self.client.get_all_project_info(project_id))[
+            "territory"
+        ]["id"]
+        base_sid = await self.client.get_base_scenario_id(project_id)
         ctx_src, ctx_year = await self.client.get_optimal_func_zone_request_data(
-            token=token, data_id=base_sid, source=None, year=None, project=False
+            data_id=base_sid, source=None, year=None, project=False
         )
 
         normatives = (await self.client.get_territory_normatives(territory_id))[
@@ -387,8 +356,10 @@ class ContextService:
             service_types, SOCIAL_INDICATORS_MAPPING
         ).join(normatives)
 
-        ctx_blocks, _ = await self.aggregate_blocks_layer_context(base_sid, ctx_src, ctx_year, token)
-        ctx_territories = await self.get_context_territories(project_id, token)
+        ctx_blocks, _ = await self.aggregate_blocks_layer_context(
+            base_sid, ctx_src, ctx_year
+        )
+        ctx_territories = await self.get_context_territories(project_id)
 
         ctx_blocks_path = self.cache.save_gdf_artifact(
             ctx_blocks,

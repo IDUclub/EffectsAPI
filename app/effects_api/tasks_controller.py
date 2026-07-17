@@ -36,7 +36,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 _locks: dict[str, asyncio.Lock] = {}
 
 
-#TODO continue response schemas
+# TODO continue response schemas
 
 def _get_lock(key: str) -> asyncio.Lock:
     lock = _locks.get(key)
@@ -46,10 +46,8 @@ def _get_lock(key: str) -> asyncio.Lock:
     return lock
 
 
-async def _with_defaults(
-    dto: ContextDevelopmentDTO, token: str
-) -> ContextDevelopmentDTO:
-    return await effects_service.get_optimal_func_zone_data(dto, token)
+async def _with_defaults(dto: ContextDevelopmentDTO) -> ContextDevelopmentDTO:
+    return await effects_service.get_optimal_func_zone_data(dto)
 
 
 def _is_fc(x: dict) -> bool:
@@ -120,8 +118,8 @@ async def create_scenario_task(
     lock = _get_lock(coarse_key)
 
     async with lock:
-        params_filled = await effects_service.get_optimal_func_zone_data(params, token)
-        params_for_hash = await effects_service.build_hash_params(params_filled, token)
+        params_filled = await effects_service.get_optimal_func_zone_data(params)
+        params_for_hash = await effects_service.build_hash_params(params_filled)
         phash = file_cache.params_hash(params_for_hash)
 
         task_id = f"{method}_{params_filled.scenario_id}_{phash}"
@@ -142,7 +140,6 @@ async def create_scenario_task(
         task = AnyTask(
             method,
             params_filled.scenario_id,
-            token,
             params_filled,
             phash,
             file_cache,
@@ -184,7 +181,7 @@ async def create_project_task(
     await urban_api_client.ensure_project_access(params.project_id, token)
 
     try:
-        result = await create_task(method, token, params)
+        result = await create_task(method, params)
     except Exception as e:
         logger.exception("Failed to enqueue project task")
         raise http_exception(
@@ -259,15 +256,13 @@ async def get_service_types(
 
     if method == "territory_transformation":
         data = await get_services_with_ids_from_layer(
-            scenario_id, method, file_cache, effects_utils, token=token,
-            client=urban_api_client,
+            scenario_id, method, file_cache, effects_utils, client=urban_api_client
         )
         return ServiceTypesResponse(before=data["before"], after=data.get("after", []))
 
     if method == "values_oriented_requirements":
         services = await get_services_with_ids_from_layer(
-            scenario_id, method, file_cache, effects_utils, token=token,
-            client=urban_api_client,
+            scenario_id, method, file_cache, effects_utils, client=urban_api_client
         )
         return ValuesServiceTypesResponse(
             services=services.get("services", [])
@@ -350,7 +345,7 @@ async def get_values_oriented_requirements_layer(
 ):
     await urban_api_client.ensure_scenario_access(scenario_id, token)
 
-    base_id = await effects_utils.resolve_base_id(token, scenario_id)
+    base_id = await effects_utils.resolve_base_id(scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
@@ -358,7 +353,7 @@ async def get_values_oriented_requirements_layer(
             404, f"no saved result for base scenario {base_id}", base_id
         )
 
-    info_base = await urban_api_client.get_scenario_info(base_id, token)
+    info_base = await urban_api_client.get_scenario_info(base_id)
     if cached.get("meta", {}).get("scenario_updated_at") != info_base.get("updated_at"):
         raise http_exception(
             404, f"stale cache for base scenario {base_id}, recompute required", base_id
@@ -396,7 +391,7 @@ async def get_values_oriented_requirements_table(
 ):
     await urban_api_client.ensure_scenario_access(scenario_id, token)
 
-    base_id = await effects_utils.resolve_base_id(token, scenario_id)
+    base_id = await effects_utils.resolve_base_id(scenario_id)
 
     cached = file_cache.load_latest("values_oriented_requirements", base_id)
     if not cached:
@@ -404,7 +399,7 @@ async def get_values_oriented_requirements_table(
             404, f"no saved result for base scenario {base_id}", base_id
         )
 
-    info_base = await urban_api_client.get_scenario_info(base_id, token)
+    info_base = await urban_api_client.get_scenario_info(base_id)
     if cached.get("meta", {}).get("scenario_updated_at") != info_base.get("updated_at"):
         raise http_exception(
             404, f"stale cache for base scenario {base_id}, recompute required", base_id

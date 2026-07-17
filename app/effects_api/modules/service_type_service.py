@@ -139,11 +139,10 @@ async def get_services_with_ids_from_layer(
     method: str,
     cache: FileCache,
     utils: EffectsUtils,
-    token: str | None = None,
     client: UrbanAPIClient | None = None,
 ) -> dict:
     if method == "values_oriented_requirements":
-        scenario_id = await utils.resolve_base_id(token, scenario_id)
+        scenario_id = await utils.resolve_base_id(scenario_id)
 
     cached: dict | None = cache.load_latest(method, scenario_id)
     if not cached or "data" not in cached:

@@ -54,7 +54,6 @@ class AnyTask:
         self,
         method: str,
         scenario_id: int,
-        token: str,
         params: Any,
         params_hash: str,
         cache: file_cache,
@@ -62,7 +61,6 @@ class AnyTask:
     ):
         self.method = method
         self.scenario_id = scenario_id
-        self.token = token
         self.params = params
         self.param_hash = params_hash
 
@@ -105,7 +103,7 @@ class AnyTask:
                 return
 
             func = TASK_METHODS[self.method]
-            raw_data = await func(self.token, self.params)
+            raw_data = await func(self.params)
 
             self.result = self._serialize_result(raw_data)
             self.status = "done"
@@ -140,7 +138,6 @@ class AnyTask:
 
 async def create_task(
     method: str,
-    token: str,
     params,
 ) -> dict:
     """
@@ -195,16 +192,14 @@ async def create_task(
         if not force and existing and existing.status in {"queued", "running"}:
             return {"task_id": task_id, "status": existing.status}
 
-        task = AnyTask(method, owner_id, token, params, phash, file_cache, task_id)
+        task = AnyTask(method, owner_id, params, phash, file_cache, task_id)
         _task_map[task_id] = task
         TASK_METRICS.on_enqueued(method)
         await _task_queue.put(task)
         return {"task_id": task_id, "status": "queued"}
 
     if method == "values_oriented_requirements":
-        base_id = await effects_utils._resolve_base_id(
-            token, getattr(params, "scenario_id")
-        )
+        base_id = await effects_utils._resolve_base_id(getattr(params, "scenario_id"))
         logger.info(
             "[Tasks] values_oriented_requirements base_id=%s (requested=%s)",
             base_id,
@@ -220,11 +215,9 @@ async def create_task(
                 "context_func_source_year": None,
             }
         )
-        norm_params = await effects_service.get_optimal_func_zone_data(
-            base_params, token
-        )
+        norm_params = await effects_service.get_optimal_func_zone_data(base_params)
 
-        params_for_hash = await effects_service.build_hash_params(norm_params, token)
+        params_for_hash = await effects_service.build_hash_params(norm_params)
         phash = file_cache.params_hash(params_for_hash)
         owner_id = base_id
         task_id = f"{method}_{owner_id}_{phash}"
@@ -235,7 +228,7 @@ async def create_task(
             TASK_METRICS.on_cache_hit(method)
             return {"task_id": task_id, "status": "done"}
 
-        task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
+        task = AnyTask(method, owner_id, norm_params, phash, file_cache, task_id)
         if task.task_id in _task_map:
             return {"task_id": task.task_id, "status": "running"}
         _task_map[task.task_id] = task
@@ -243,8 +236,8 @@ async def create_task(
         await _task_queue.put(task)
         return {"task_id": task.task_id, "status": "queued"}
 
-    norm_params = await effects_service.get_optimal_func_zone_data(params, token)
-    params_for_hash = await effects_service.build_hash_params(norm_params, token)
+    norm_params = await effects_service.get_optimal_func_zone_data(params)
+    params_for_hash = await effects_service.build_hash_params(norm_params)
     phash = file_cache.params_hash(params_for_hash)
     owner_id = norm_params.scenario_id
     task_id = f"{method}_{owner_id}_{phash}"
@@ -254,7 +247,7 @@ async def create_task(
         TASK_METRICS.on_cache_hit(method)
         return {"task_id": task_id, "status": "done"}
 
-    task = AnyTask(method, owner_id, token, norm_params, phash, file_cache, task_id)
+    task = AnyTask(method, owner_id, norm_params, phash, file_cache, task_id)
     if task.task_id in _task_map:
         return {"task_id": task.task_id, "status": "running"}
     _task_map[task.task_id] = task

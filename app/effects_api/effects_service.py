@@ -130,17 +130,15 @@ class EffectsService:
         self.__name__ = "EffectsService"
 
     async def build_hash_params(
-        self,
-        params: ContextDevelopmentDTO | DevelopmentDTO,
-        token: str,
+        self, params: ContextDevelopmentDTO | DevelopmentDTO
     ) -> dict:
         project_id = (
-            await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+            await self.urban_api_client.get_scenario_info(params.scenario_id)
         )["project"]["project_id"]
-        base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id, token)
+        base_scenario_id = await self.urban_api_client.get_base_scenario_id(project_id)
         base_src, base_year = (
             await self.urban_api_client.get_optimal_func_zone_request_data(
-                token, base_scenario_id, None, None
+                base_scenario_id, None, None
             )
         )
         p = params.model_dump()
@@ -158,7 +156,6 @@ class EffectsService:
             | SocioEconomicByProjectDTO
             | TerritoryTransformationDTO
         ),
-        token: str,
     ) -> DevelopmentDTO:
         """
         Get optimal functional zone source and year for the project scenario.
@@ -173,7 +170,6 @@ class EffectsService:
         if not params.proj_func_zone_source or not params.proj_func_source_year:
             (params.proj_func_zone_source, params.proj_func_source_year) = (
                 await self.urban_api_client.get_optimal_func_zone_request_data(
-                    token,
                     params.scenario_id,
                     params.proj_func_zone_source,
                     params.proj_func_source_year,
@@ -188,7 +184,6 @@ class EffectsService:
                         params.context_func_zone_source,
                         params.context_func_source_year,
                     ) = await self.urban_api_client.get_optimal_func_zone_request_data(
-                        token,
                         params.scenario_id,
                         params.context_func_zone_source,
                         params.context_func_source_year,
@@ -313,12 +308,10 @@ class EffectsService:
         )
         return prov_gdfs, prov_totals
 
-
     async def territory_transformation_scenario_before(
-            self,
-            token: str,
-            params: ContextDevelopmentDTO,
-            context_blocks: gpd.GeoDataFrame | None = None,
+        self,
+        params: ContextDevelopmentDTO,
+        context_blocks: gpd.GeoDataFrame | None = None,
     ):
         """Compute and cache provision layers for territory transformation.
 
@@ -338,15 +331,15 @@ class EffectsService:
 
         method_name = "territory_transformation"
 
-        info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+        info = await self.urban_api_client.get_scenario_info(params.scenario_id)
         updated_at = info["updated_at"]
         is_based = bool(info.get("is_based"))
         project_id = info["project"]["project_id"]
-        base_id_response = await self.urban_api_client.get_all_project_info(project_id, token)
+        base_id_response = await self.urban_api_client.get_all_project_info(project_id)
         base_scenario_id = base_id_response["base_scenario"]["id"]
 
-        params = await self.get_optimal_func_zone_data(params, token)
-        params_for_hash = await self.build_hash_params(params, token)
+        params = await self.get_optimal_func_zone_data(params)
+        params_for_hash = await self.build_hash_params(params)
         phash = self.cache.params_hash(params_for_hash)
 
         force = bool(getattr(params, "force", False))
@@ -383,11 +376,13 @@ class EffectsService:
         service_types = await adapt_service_types(service_types, self.urban_api_client)
         service_types = service_types[~service_types["infrastructure_type"].isna()].copy()
 
-        base_src, base_year = await self.urban_api_client.get_optimal_func_zone_request_data(
-            token, base_scenario_id, None, None
+        base_src, base_year = (
+            await self.urban_api_client.get_optimal_func_zone_request_data(
+                base_scenario_id, None, None
+            )
         )
         base_scenario_blocks, _ = await self.scenario.aggregate_blocks_layer_scenario(
-            base_scenario_id, base_src, base_year, token
+            base_scenario_id, base_src, base_year
         )
 
         if context_blocks is None:
@@ -419,7 +414,6 @@ class EffectsService:
                 params.scenario_id,
                 params.proj_func_zone_source,
                 params.proj_func_source_year,
-                token,
             )
 
             after_blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(
@@ -566,11 +560,10 @@ class EffectsService:
         return facade
 
     async def territory_transformation_scenario_after(
-            self,
-            token: str,
-            params: ContextDevelopmentDTO | DevelopmentDTO,
-            context_blocks: gpd.GeoDataFrame,
-            save_cache: bool = True,
+        self,
+        params: ContextDevelopmentDTO | DevelopmentDTO,
+        context_blocks: gpd.GeoDataFrame,
+        save_cache: bool = True,
     ) -> dict[str, Any]:
         """Compute and (optionally) cache optimization result for values transformation.
 
@@ -587,7 +580,7 @@ class EffectsService:
 
         opt_method = "territory_transformation_opt"
 
-        info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+        info = await self.urban_api_client.get_scenario_info(params.scenario_id)
         updated_at = info["updated_at"]
         is_based = bool(info.get("is_based"))
 
@@ -597,8 +590,8 @@ class EffectsService:
                 400, "Base scenario has no optimization 'after' context"
             )
 
-        params = await self.get_optimal_func_zone_data(params, token)
-        params_for_hash = await self.build_hash_params(params, token)
+        params = await self.get_optimal_func_zone_data(params)
+        params_for_hash = await self.build_hash_params(params)
         phash = self.cache.params_hash(params_for_hash)
 
         force = bool(getattr(params, "force", False))
@@ -622,7 +615,6 @@ class EffectsService:
             params.scenario_id,
             params.proj_func_zone_source,
             params.proj_func_source_year,
-            token,
         )
 
         after_blocks = pd.concat([context_blocks, scenario_blocks]).reset_index(drop=True)
@@ -697,9 +689,7 @@ class EffectsService:
         return {"best_x": best_x}
 
     async def territory_transformation(
-            self,
-            token: str,
-            params: ContextDevelopmentDTO,
+        self, params: ContextDevelopmentDTO
     ) -> dict[str, Any] | dict[str, dict[str, Any]]:
         """Compute territory transformation provision layers.
 
@@ -709,7 +699,7 @@ class EffectsService:
             is omitted for base scenarios.
         """
         project_id = (
-            await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+            await self.urban_api_client.get_scenario_info(params.scenario_id)
         )["project"]["project_id"]
 
         # context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id,
@@ -718,12 +708,13 @@ class EffectsService:
             params.scenario_id,
             params.context_func_zone_source,
             params.context_func_source_year,
-            token,
         )
         EFFECTS_TERRITORY_TRANSFORMATION_TOTAL.inc()
         start_time = time.perf_counter()
         try:
-            return await self.territory_transformation_scenario_before(token, params, context_blocks)
+            return await self.territory_transformation_scenario_before(
+                params, context_blocks
+            )
         except Exception:
             EFFECTS_TERRITORY_TRANSFORMATION_ERROR_TOTAL.inc()
             raise
@@ -732,11 +723,7 @@ class EffectsService:
                 time.perf_counter() - start_time
             )
 
-    async def values_transformation(
-        self,
-        token: str,
-        params: TerritoryTransformationDTO,
-    ) -> dict:
+    async def values_transformation(self, params: TerritoryTransformationDTO) -> dict:
         EFFECTS_VALUES_TRANSFORMATION_TOTAL.inc()
         start_time = time.perf_counter()
         try:
@@ -744,20 +731,19 @@ class EffectsService:
 
             opt_method = "territory_transformation_opt"
 
-            params = await self.get_optimal_func_zone_data(params, token)
+            params = await self.get_optimal_func_zone_data(params)
 
-            params_for_hash = await self.build_hash_params(params, token)
+            params_for_hash = await self.build_hash_params(params)
             phash = self.cache.params_hash(params_for_hash)
             force = getattr(params, "force", False)
 
-            info = await self.urban_api_client.get_scenario_info(params.scenario_id, token)
+            info = await self.urban_api_client.get_scenario_info(params.scenario_id)
             updated_at = info["updated_at"]
 
             context_blocks, _ = await self.context.aggregate_blocks_layer_context(
                 params.scenario_id,
                 params.context_func_zone_source,
                 params.context_func_source_year,
-                token,
             )
 
             opt_cached = (
@@ -771,7 +757,7 @@ class EffectsService:
             )
             if need_refresh:
                 res = await self.territory_transformation_scenario_after(
-                    token, params, context_blocks, save_cache=False
+                    params, context_blocks, save_cache=False
                 )
                 best_x_val = res["best_x"]
 
@@ -790,7 +776,6 @@ class EffectsService:
                 params.scenario_id,
                 params.proj_func_zone_source,
                 params.proj_func_source_year,
-                token,
             )
 
             after_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=False)
@@ -1028,7 +1013,6 @@ class EffectsService:
 
     async def values_oriented_requirements(
         self,
-        token: str,
         params: TerritoryTransformationDTO | DevelopmentDTO,
         persist: Literal["full", "table_only"] = "full",
     ):
@@ -1039,7 +1023,7 @@ class EffectsService:
 
             force: bool = bool(getattr(params, "force", False))
 
-            base_id = await self.effects_utils.resolve_base_id(token, params.scenario_id)
+            base_id = await self.effects_utils.resolve_base_id(params.scenario_id)
             logger.info(
                 f"Using base scenario_id={base_id} (requested={params.scenario_id})"
             )
@@ -1053,11 +1037,11 @@ class EffectsService:
                     "context_func_source_year": None,
                 }
             )
-            params_base = await self.get_optimal_func_zone_data(params_base, token)
+            params_base = await self.get_optimal_func_zone_data(params_base)
 
-            params_for_hash_base = await self.build_hash_params(params_base, token)
+            params_for_hash_base = await self.build_hash_params(params_base)
             phash_base = self.cache.params_hash(params_for_hash_base)
-            info_base = await self.urban_api_client.get_scenario_info(base_id, token)
+            info_base = await self.urban_api_client.get_scenario_info(base_id)
             updated_at_base = info_base["updated_at"]
 
             def _result_to_df(payload: Any) -> pd.DataFrame:
@@ -1088,14 +1072,12 @@ class EffectsService:
                 params.scenario_id,
                 params_base.context_func_zone_source,
                 params_base.context_func_source_year,
-                token,
             )
 
             scenario_blocks, _ = await self.scenario.aggregate_blocks_layer_scenario(
                 params_base.scenario_id,
                 params_base.proj_func_zone_source,
                 params_base.proj_func_source_year,
-                token,
             )
             scenario_blocks = scenario_blocks.to_crs(context_blocks.crs)
 
@@ -1408,8 +1390,10 @@ class EffectsService:
             logger.info("CatBoost land price model loaded")
             return model
 
-    async def _fetch_land_use_potentials(self, scenario_id: int, token: str) -> pd.DataFrame:
-        scenario_indicators = await self.urban_api_client.get_indicator_scenario_value(scenario_id, token)
+    async def _fetch_land_use_potentials(self, scenario_id: int) -> pd.DataFrame:
+        scenario_indicators = await self.urban_api_client.get_indicator_scenario_value(
+            scenario_id
+        )
 
         indicator_attributes = {
             (item.get("indicator") or {}).get("name_full"): item.get("value")
@@ -1433,7 +1417,6 @@ class EffectsService:
         service_types_df: pd.DataFrame,
         proj_src: str,
         proj_year: int,
-        token: str,
         only_parent_ids: set[int] | None = None,
     ) -> list[dict]:
         """
@@ -1443,7 +1426,7 @@ class EffectsService:
         logger.info(f"Computing indicators for scenario_id={scenario_id}")
 
         scenario_blocks, _ = await self.scenario.aggregate_blocks_layer_scenario(
-            scenario_id, proj_src, proj_year, token
+            scenario_id, proj_src, proj_year
         )
         before_blocks = pd.concat([context_blocks, scenario_blocks], ignore_index=True)
 
@@ -1485,7 +1468,7 @@ class EffectsService:
             before_blocks["population"] = 0
 
         roads_gdf = await self.urban_api_client.get_physical_objects_scenario(
-            scenario_id, token=token, physical_object_function_id=ROADS_ID
+            scenario_id, physical_object_function_id=ROADS_ID
         )
         if roads_gdf is not None and not roads_gdf.empty:
             roads_gdf = roads_gdf.to_crs(before_blocks.crs).overlay(before_blocks)
@@ -1576,7 +1559,6 @@ class EffectsService:
                     scenario_blocks=scenario_blocks,
                     context_blocks=context_blocks,
                     context_territories_gdf=context_territories_gdf,
-                    token=token,
                     only_parent_ids=only_parent_ids,
                     territory_id_hint=territory_id_hint,
                 )
@@ -1773,14 +1755,13 @@ class EffectsService:
         raise TypeError(f"Unsupported SEREstimator result type: {type(result)!r}")
 
     async def _compute_urbanomy_for_single_scenario(
-            self,
-            scenario_id: int,
-            scenario_blocks: gpd.GeoDataFrame,
-            context_blocks: gpd.GeoDataFrame,
-            context_territories_gdf: gpd.GeoDataFrame,
-            token: str,
-            only_parent_ids: set[int] | None = None,
-            territory_id_hint: int | None = None,
+        self,
+        scenario_id: int,
+        scenario_blocks: gpd.GeoDataFrame,
+        context_blocks: gpd.GeoDataFrame,
+        context_territories_gdf: gpd.GeoDataFrame,
+        only_parent_ids: set[int] | None = None,
+        territory_id_hint: int | None = None,
     ) -> list[dict]:
         """Compute Urbanomy metrics for one scenario and return records:
         [{territory_id, indicator_id, indicator_name, value}, ...]
@@ -1839,7 +1820,7 @@ class EffectsService:
             if project_blocks.empty:
                 return []
 
-        potential_df = await self._fetch_land_use_potentials(scenario_id=scenario_id, token=token)
+        potential_df = await self._fetch_land_use_potentials(scenario_id=scenario_id)
 
         investment_input = prepare_investment_input(gdf=project_blocks, project_potential=potential_df)
 
@@ -1883,7 +1864,6 @@ class EffectsService:
                 except Exception:
                     continue
 
-
                 terr = pivot.setdefault(t_id, {})
                 ind = terr.setdefault(ind_id, {})
                 ind[int(scenario_id)] = rec.get("value")
@@ -1902,7 +1882,9 @@ class EffectsService:
             return results
         return {tid: results[tid] for tid in territory_ids if tid in results}
 
-    async def evaluate_social_economical_metrics(self, token: str, params: SocioEconomicByProjectDTO):
+    async def evaluate_social_economical_metrics(
+        self, params: SocioEconomicByProjectDTO
+    ):
         """
         Project-level multi-scenario calculation with a shared context.
         Return: {territory_id: {indicator_name: {scenario_id: value}}}
@@ -1932,10 +1914,11 @@ class EffectsService:
             else:
                 logger.info(f"[Effects] force=True, recalculating metrics for project {project_id}, parent={parent_id}")
 
-            context_blocks, context_territories_gdf, service_types = await self.context.get_shared_context(project_id,
-                                                                                                           token)
+            context_blocks, context_territories_gdf, service_types = (
+                await self.context.get_shared_context(project_id)
+            )
 
-            scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
+            scenarios = await self.urban_api_client.get_project_scenarios(project_id)
             target = [s for s in scenarios if (s.get("parent_scenario") or {}).get("id") == parent_id]
             logger.info(f"[Effects] matched {len(target)} scenarios in project {project_id} (parent={parent_id})")
 
@@ -1946,12 +1929,10 @@ class EffectsService:
             for s in target:
                 sid = int(s["scenario_id"])
                 try:
-                    proj_src, proj_year = await self.urban_api_client.get_optimal_func_zone_request_data(
-                        token=token,
-                        data_id=sid,
-                        source=None,
-                        year=None,
-                        project=True,
+                    proj_src, proj_year = (
+                        await self.urban_api_client.get_optimal_func_zone_request_data(
+                            data_id=sid, source=None, year=None, project=True
+                        )
                     )
 
                     records = await self._compute_for_single_scenario(
@@ -1961,7 +1942,6 @@ class EffectsService:
                         service_types_df=service_types,
                         proj_src=proj_src,
                         proj_year=proj_year,
-                        token=token,
                         only_parent_ids=only_parent_ids,
                     )
                     results[sid] = records
@@ -1972,7 +1952,7 @@ class EffectsService:
             results_all = await self._pivot_results_by_territory(results)
             results_all = self._sanitize_for_json(results_all)
 
-            project_info = await self.urban_api_client.get_project(project_id, token)
+            project_info = await self.urban_api_client.get_project(project_id)
             updated_at = project_info.get("updated_at")
 
             self.cache.save(
@@ -1990,4 +1970,3 @@ class EffectsService:
             raise
         finally:
             EFFECTS_SOCIO_ECONOMICAL_METRICS_DURATION_SECONDS.observe(time.perf_counter() - start_time)
-

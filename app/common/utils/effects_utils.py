@@ -24,15 +24,15 @@ class EffectsUtils:
         except Exception:
             return None
 
-    async def resolve_base_id(self, token: str, scenario_id: int) -> int:
-        info = await self.urban_api_client.get_scenario_info(scenario_id, token)
+    async def resolve_base_id(self, scenario_id: int) -> int:
+        info = await self.urban_api_client.get_scenario_info(scenario_id)
         project_id = (info.get("project") or {}).get("project_id")
         regional_id = (info.get("parent_scenario") or {}).get("id")
 
         if not project_id or not regional_id:
             return scenario_id
 
-        scenarios = await self.urban_api_client.get_project_scenarios(project_id, token)
+        scenarios = await self.urban_api_client.get_project_scenarios(project_id)
         matches = [
             s
             for s in scenarios
